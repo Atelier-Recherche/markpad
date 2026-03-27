@@ -1,6 +1,26 @@
 :root {
-  color-scheme: dark;
   font-family: "Segoe UI", Arial, sans-serif;
+  --bg: #0b1220;
+  --text: #f8fafc;
+  --surface: #0f172a;
+  --surface-strong: #020617;
+  --border: #334155;
+  --badge-connected: #14532d;
+  --badge-offline: #7f1d1d;
+  --button-bg: #0ea5e9;
+  --button-text: #042f47;
+}
+
+:root[data-theme="light"] {
+  --bg: #f8fafc;
+  --text: #0f172a;
+  --surface: #ffffff;
+  --surface-strong: #f1f5f9;
+  --border: #cbd5e1;
+  --badge-connected: #bbf7d0;
+  --badge-offline: #fecaca;
+  --button-bg: #0284c7;
+  --button-text: #f8fafc;
 }
 
 * {
@@ -9,8 +29,8 @@
 
 body {
   margin: 0;
-  background: #0b1220;
-  color: #f8fafc;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .page {
@@ -35,12 +55,16 @@ body {
 }
 
 .mode-toggle {
-  border: 1px solid #334155;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 10px;
-  background: #0f172a;
-  color: #f8fafc;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
+}
+.mode-toggle.active {
+  background: var(--button-bg);
+  color: var(--button-text);
 }
 
 .topbar h1 {
@@ -50,15 +74,15 @@ body {
 .badge {
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid #334155;
+  border: 1px solid var(--border);
 }
 
 .badge.connected {
-  background: #14532d;
+  background: var(--badge-connected);
 }
 
 .badge.offline {
-  background: #7f1d1d;
+  background: var(--badge-offline);
 }
 
 .join {
@@ -75,9 +99,9 @@ body {
 .join input {
   padding: 10px;
   border-radius: 10px;
-  border: 1px solid #334155;
-  background: #0f172a;
-  color: #f8fafc;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .join button {
@@ -85,8 +109,8 @@ body {
   padding: 10px 14px;
   border: 0;
   border-radius: 10px;
-  background: #0ea5e9;
-  color: #042f47;
+  background: var(--button-bg);
+  color: var(--button-text);
   font-weight: 600;
   cursor: pointer;
 }
@@ -117,27 +141,97 @@ body {
 .editor-container {
   min-height: 0;
 }
+.workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 12px;
+}
 
 .editor {
   height: calc(100dvh - 220px);
-  border: 1px solid #334155;
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: auto;
-  background: #020617;
+  background: var(--surface-strong);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
 }
 
 .cm-editor {
   min-height: calc(100dvh - 220px);
+  background: transparent;
+}
+
+.milkdown-host {
+  min-height: calc(100dvh - 220px);
+}
+
+.milkdown .editor {
+  font-size: 15px;
+}
+
+.milkdown .ProseMirror {
+  min-height: calc(100dvh - 260px);
+  padding: 16px 18px;
+  color: var(--text);
 }
 
 .preview {
   height: calc(100dvh - 220px);
-  border: 1px solid #334155;
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: auto;
-  background: #0b1020;
+  background: var(--surface);
   padding: 16px;
   line-height: 1.5;
+}
+
+.source-editor {
+  height: calc(100dvh - 220px);
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  padding: 16px 18px;
+  resize: none;
+  font-family:
+    "JetBrains Mono",
+    "Fira Code",
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+
+.toc-panel {
+  height: calc(100dvh - 220px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: auto;
+  padding: 10px;
+}
+
+.toc-panel h3 {
+  margin: 0 0 8px;
+}
+
+.toc-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.toc-item:hover {
+  background: color-mix(in srgb, var(--surface-strong) 60%, transparent);
 }
 
 .markdown-body h1,
@@ -147,15 +241,15 @@ body {
 }
 
 .markdown-body pre {
-  background: #020617;
-  border: 1px solid #334155;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px;
   overflow: auto;
 }
 
 .markdown-body code {
-  background: #1e293b;
+  background: var(--surface-strong);
   border-radius: 5px;
   padding: 2px 5px;
 }
@@ -168,5 +262,18 @@ body {
   .preview {
     height: auto;
     min-height: 40dvh;
+  }
+
+  .source-editor {
+    height: calc(100dvh - 260px);
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .toc-panel {
+    height: auto;
+    max-height: 35dvh;
   }
 }

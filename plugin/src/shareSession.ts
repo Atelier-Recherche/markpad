@@ -37,3 +37,26 @@ export const createShareSession = async (payload: {
     shareUrl: json.shareUrl
   };
 };
+
+export const endShareSession = async (payload: {
+  serverUrl: string;
+  settings: MarkpadSettings;
+  roomId: string;
+}): Promise<void> => {
+  const endpoint = `${payload.serverUrl}/sessions/${payload.roomId}`;
+  const response = await requestUrl({
+    url: endpoint,
+    method: "DELETE",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${payload.settings.apiKey}`
+    },
+    body: JSON.stringify({
+      userId: payload.settings.userId
+    })
+  });
+
+  if (response.status < 200 || response.status > 299) {
+    throw new Error(`session_delete_failed (${response.status})`);
+  }
+};

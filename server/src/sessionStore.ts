@@ -54,4 +54,14 @@ export class SessionStore {
       roomPassword: raw.roomPassword || undefined
     };
   }
+
+  public async deleteSession(roomId: string): Promise<SessionRecord | null> {
+    const existing = await this.getSession(roomId);
+    if (!existing) {
+      return null;
+    }
+    await this.redis.del(sessionKey(roomId));
+    await this.redis.del(noteRoomKey(existing.noteId));
+    return existing;
+  }
 }

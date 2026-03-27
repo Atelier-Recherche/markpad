@@ -18,4 +18,8 @@ export class RedisDocStore {
     const state = Y.encodeStateAsUpdate(doc);
     await this.redis.set(docKey(roomId), Buffer.from(state));
   }
+
+  public async delete(roomId: string): Promise<void> {
+    await this.redis.del(docKey(roomId));
+  }
 }

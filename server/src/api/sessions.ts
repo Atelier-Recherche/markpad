@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { config } from "../config.js";
+import { RedisDocStore } from "../persistence/redisDocStore.js";
 import { SessionStore } from "../sessionStore.js";
 
 const hash = (value: string): Buffer => createHash("sha256").update(value).digest();
@@ -18,7 +19,8 @@ const extractApiKey = (raw: string | undefined): string => {
 
 export const registerSessionsApi = (
   app: Express,
-  sessions: SessionStore
+  sessions: SessionStore,
+  docs: RedisDocStore
 ): void => {
   app.post("/sessions", async (req, res) => {
     const apiKey = extractApiKey(req.header("authorization"));
@@ -55,6 +57,34 @@ export const registerSessionsApi = (
       ...created,
       shareUrl
     });
+  });
+
+  app.delete("/sessions/:roomId", async (req, res) => {
+    const apiKey = extractApiKey(req.header("authorization"));
+    const keyOk = config.allowedApiKeys.some((key) => safeEq(apiKey, key));
+    if (!keyOk) {
+      res.status(401).json({ error: "invalid_api_key" });
+      return;
+    }
+
+    const roomId = req.params.roomId;
+    const body = req.body as { userId?: string };
+    if (!body.userId) {
+      res.status(400).json({ error: "userId_required" });
+      return;
+    }
+    const session = await sessions.getSession(roomId);
+    if (!session) {
+      res.status(404).json({ error: "session_not_found" });
+      return;
+    }
+    if (session.ownerUserId !== body.userId) {
+      res.status(403).json({ error: "only_owner_can_delete_session" });
+      return;
+    }
+    await sessions.deleteSession(roomId);
+    await docs.delete(roomId);
+    res.status(204).send();
   });
 
   app.post("/sessions/:roomId/validate", async (req, res) => {

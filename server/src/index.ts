@@ -29,7 +29,7 @@ app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
 });
 
-registerSessionsApi(app, sessionStore);
+registerSessionsApi(app, sessionStore, docStore);
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });

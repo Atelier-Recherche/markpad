@@ -1,17 +1,37 @@
-import { EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
-import { markdown } from "@codemirror/lang-markdown";
-import { yCollab } from "y-codemirror.next";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { extractPresence } from "./presence";
 
 export interface CollabRuntime {
-  view: EditorView;
   doc: Y.Doc;
   provider: WebsocketProvider;
   destroy: () => void;
 }
+
+type FrontmatterSplit = {
+  frontmatter: string;
+  body: string;
+};
+
+const splitFrontmatter = (raw: string): FrontmatterSplit => {
+  if (!raw.startsWith("---\n")) {
+    return { frontmatter: "", body: raw };
+  }
+  const lines = raw.split("\n");
+  let closing = -1;
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i] === "---" || lines[i] === "...") {
+      closing = i;
+      break;
+    }
+  }
+  if (closing === -1) {
+    return { frontmatter: "", body: raw };
+  }
+  const frontmatter = `${lines.slice(0, closing + 1).join("\n")}\n`;
+  const body = lines.slice(closing + 1).join("\n");
+  return { frontmatter, body };
+};
 
 export const createCollabEditor = (input: {
   parent: HTMLElement;
@@ -49,38 +69,83 @@ export const createCollabEditor = (input: {
   });
 
   const yText = doc.getText("content");
+  const host = document.createElement("div");
+  host.className = "milkdown-host";
+  input.parent.innerHTML = "";
+  input.parent.appendChild(host);
+
+  let destroyed = false;
+  let applyingRemote = false;
+  let hiddenFrontmatter = "";
+  let localMirror = splitFrontmatter(yText.toString()).body;
+  type MilkdownLike = {
+    create?: () => Promise<void>;
+    destroy?: () => void;
+    getMarkdown?: () => string;
+    setMarkdown?: (value: string) => void;
+  };
+  let editor: MilkdownLike | null = null;
+
   const yTextObserver = () => {
-    input.onTextChange?.(yText.toString());
+    const nextRaw = yText.toString();
+    const split = splitFrontmatter(nextRaw);
+    hiddenFrontmatter = split.frontmatter;
+    localMirror = split.body;
+    input.onTextChange?.(split.body);
+    if (!editor || !editor.setMarkdown || applyingRemote) return;
+    applyingRemote = true;
+    try {
+      editor.setMarkdown(split.body);
+    } finally {
+      applyingRemote = false;
+    }
   };
   yText.observe(yTextObserver);
   yTextObserver();
 
-  const state = EditorState.create({
-    extensions: [
-      keymap.of([]),
-      markdown(),
-      EditorView.lineWrapping,
-      yCollab(yText, provider.awareness)
-    ]
-  });
+  void (async () => {
+    const { Crepe } = await import("@milkdown/crepe");
+    if (destroyed) return;
+    const crepe = new Crepe({
+      root: host,
+      defaultValue: localMirror
+    }) as unknown as MilkdownLike;
+    editor = crepe;
+    if (typeof editor?.create === "function") {
+      await editor.create();
+    }
+    if (destroyed) return;
+    if (typeof editor?.setMarkdown === "function") {
+      editor.setMarkdown(localMirror);
+    }
+  })();
 
-  const view = new EditorView({
-    state:
-      state as unknown as NonNullable<
-        ConstructorParameters<typeof EditorView>[0]
-      >["state"],
-    parent: input.parent
-  });
+  const syncTimer = window.setInterval(() => {
+    if (!editor || !editor.getMarkdown || applyingRemote) return;
+    const current = editor.getMarkdown();
+    if (current === localMirror) return;
+    localMirror = current;
+    input.onTextChange?.(current);
+    const nextRaw = `${hiddenFrontmatter}${current}`;
+    doc.transact(() => {
+      yText.delete(0, yText.length);
+      yText.insert(0, nextRaw);
+    }, "milkdown-local");
+  }, 250);
 
   return {
-    view,
     doc,
     provider,
     destroy: () => {
+      destroyed = true;
+      window.clearInterval(syncTimer);
       yText.unobserve(yTextObserver);
       provider.destroy();
-      view.destroy();
+      if (editor && typeof editor.destroy === "function") {
+        editor.destroy();
+      }
       doc.destroy();
+      input.parent.innerHTML = "";
     }
   };
 };
