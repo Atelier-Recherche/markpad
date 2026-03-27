@@ -1,0 +1,35 @@
+{
+  "name": "@markpad/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "ioredis": "^5.8.1",
+    "lib0": "^0.2.114",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.30",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.7.2",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.4.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.1"
+  }
+}

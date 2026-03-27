@@ -1,0 +1,9 @@
+{
+  "id": "markpad",
+  "name": "Markpad",
+  "version": "0.1.0",
+  "minAppVersion": "1.6.0",
+  "description": "Partage collaboratif temps réel des notes Obsidian.",
+  "author": "Markpad",
+  "isDesktopOnly": false
+}

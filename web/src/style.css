@@ -1,0 +1,172 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b1220;
+  color: #f8fafc;
+}
+
+.page {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 12px;
+  padding: 12px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-toggle {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #0f172a;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.topbar h1 {
+  margin: 0;
+}
+
+.badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+}
+
+.badge.connected {
+  background: #14532d;
+}
+
+.badge.offline {
+  background: #7f1d1d;
+}
+
+.join {
+  display: grid;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.join label {
+  display: grid;
+  gap: 6px;
+}
+
+.join input {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.join button {
+  width: fit-content;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #0ea5e9;
+  color: #042f47;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.presence {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.user {
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.user i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.editor-container {
+  min-height: 0;
+}
+
+.editor {
+  height: calc(100dvh - 220px);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  overflow: auto;
+  background: #020617;
+}
+
+.cm-editor {
+  min-height: calc(100dvh - 220px);
+}
+
+.preview {
+  height: calc(100dvh - 220px);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  overflow: auto;
+  background: #0b1020;
+  padding: 16px;
+  line-height: 1.5;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin-top: 0;
+}
+
+.markdown-body pre {
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.markdown-body code {
+  background: #1e293b;
+  border-radius: 5px;
+  padding: 2px 5px;
+}
+
+@media (max-width: 700px) {
+  .editor {
+    height: calc(100dvh - 260px);
+  }
+
+  .preview {
+    height: auto;
+    min-height: 40dvh;
+  }
+}

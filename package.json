@@ -1,0 +1,21 @@
+{
+  "name": "markpad",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "plugin",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run -w server build && npm run -w web build && npm run -w plugin build",
+    "lint": "npm run -w server lint && npm run -w web lint && npm run -w plugin lint",
+    "dev:server": "npm run -w server dev",
+    "dev:web": "npm run -w web dev",
+    "dev:plugin": "npm run -w plugin dev"
+  },
+  "overrides": {
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6"
+  }
+}
