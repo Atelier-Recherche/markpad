@@ -8,6 +8,10 @@ export interface MarkpadSettings {
   displayName: string;
   color: string;
   defaultRoomPassword: string;
+  /** Reconnecter automatiquement au WebSocket quand une note avec markpadShare est ouverte */
+  autoReconnect: boolean;
+  /** Logs horodatés dans la console (Ctrl+Shift+I) pour diagnostiquer Obsidian ↔ Yjs ↔ Web */
+  debugCollab: boolean;
 }
 
 export const DEFAULT_SETTINGS: MarkpadSettings = {
@@ -16,7 +20,9 @@ export const DEFAULT_SETTINGS: MarkpadSettings = {
   userId: "",
   displayName: "Obsidian User",
   color: "#7c3aed",
-  defaultRoomPassword: ""
+  defaultRoomPassword: "",
+  autoReconnect: true,
+  debugCollab: false
 };
 
 export class MarkpadSettingTab extends PluginSettingTab {
@@ -91,6 +97,30 @@ export class MarkpadSettingTab extends PluginSettingTab {
             this.plugin.settings.defaultRoomPassword = value;
             await this.plugin.saveSettings();
           })
+      );
+
+    new Setting(containerEl)
+      .setName("Reconnexion auto")
+      .setDesc(
+        "Si une note contient markpadShare dans le frontmatter, reconnecter le WebSocket à l’ouverture (user ID requis ; mot de passe = défaut ci-dessus)."
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoReconnect).onChange(async (value) => {
+          this.plugin.settings.autoReconnect = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Logs diagnostic (console)")
+      .setDesc(
+        "Affiche dans la console développeur (Ctrl+Shift+I) des messages horodatés : résolution CodeMirror, pont CM→Y, mises à jour Y.Doc, sync WebSocket. Désactive quand tu as fini de déboguer."
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.debugCollab).onChange(async (value) => {
+          this.plugin.settings.debugCollab = value;
+          await this.plugin.saveSettings();
+        })
       );
   }
 }

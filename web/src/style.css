@@ -1,5 +1,5 @@
 :root {
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
   --bg: #0b1220;
   --text: #f8fafc;
   --surface: #0f172a;
@@ -35,8 +35,8 @@ body {
 
 .page {
   min-height: 100dvh;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 12px;
 }
@@ -48,23 +48,100 @@ body {
   gap: 12px;
 }
 
+.topbar-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topbar-brand h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.topbar-sub {
+  font-size: 11px;
+  opacity: 0.65;
+  font-weight: 500;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.mode-toggle {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
+/* Barre type Obsidian : icônes Lucide (même famille que les icônes Obsidian). */
+.obsidian-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
   background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.obsidian-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.obsidian-toolbar__sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.obsidian-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text);
   cursor: pointer;
+  opacity: 0.72;
+  transition:
+    background 0.12s ease,
+    opacity 0.12s ease;
 }
-.mode-toggle.active {
-  background: var(--button-bg);
-  color: var(--button-text);
+
+.obsidian-tool:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.obsidian-tool--active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--button-bg) 28%, transparent);
+  color: var(--text);
+}
+
+.obsidian-tool:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .topbar h1 {
@@ -72,9 +149,13 @@ body {
 }
 
 .badge {
-  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
+  font-size: 13px;
 }
 
 .badge.connected {
@@ -119,6 +200,8 @@ body {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
 }
 
 .user {
@@ -138,75 +221,88 @@ body {
   border-radius: 50%;
 }
 
-.editor-container {
-  min-height: 0;
-}
 .workspace {
+  flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 260px;
   gap: 12px;
 }
 
-.editor {
-  height: calc(100dvh - 220px);
+.workspace--no-toc {
+  grid-template-columns: 1fr;
+}
+
+.editor-shell {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-shell--split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: auto;
+  overflow: hidden;
   background: var(--surface-strong);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+}
+
+.editor-shell--split .editor {
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.editor-shell--split .preview {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.editor {
+  height: calc(100dvh - 300px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-strong);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+}
+
+.markpad-cm-root {
+  height: 100%;
+  min-height: calc(100dvh - 300px);
+}
+
+.markpad-cm-root.markpad-cm-root--no-linenum .cm-gutters {
+  display: none !important;
 }
 
 .cm-editor {
-  min-height: calc(100dvh - 220px);
+  height: 100%;
+  min-height: calc(100dvh - 302px);
   background: transparent;
 }
 
-.milkdown-host {
-  min-height: calc(100dvh - 220px);
-}
-
-.milkdown .editor {
-  font-size: 15px;
-}
-
-.milkdown .ProseMirror {
-  min-height: calc(100dvh - 260px);
-  padding: 16px 18px;
-  color: var(--text);
+.cm-editor.cm-focused {
+  outline: none;
 }
 
 .preview {
-  height: calc(100dvh - 220px);
+  height: calc(100dvh - 300px);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: auto;
   background: var(--surface);
-  padding: 16px;
-  line-height: 1.5;
-}
-
-.source-editor {
-  height: calc(100dvh - 220px);
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-strong);
-  color: var(--text);
   padding: 16px 18px;
-  resize: none;
-  font-family:
-    "JetBrains Mono",
-    "Fira Code",
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
-    monospace;
+  line-height: 1.55;
 }
 
 .toc-panel {
-  height: calc(100dvh - 220px);
+  height: calc(100dvh - 300px);
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -256,7 +352,7 @@ body {
 
 @media (max-width: 700px) {
   .editor {
-    height: calc(100dvh - 260px);
+    height: calc(100dvh - 340px);
   }
 
   .preview {
@@ -264,12 +360,23 @@ body {
     min-height: 40dvh;
   }
 
-  .source-editor {
-    height: calc(100dvh - 260px);
+  .markpad-cm-root,
+  .cm-editor {
+    min-height: calc(100dvh - 342px);
   }
 
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .editor-shell--split {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(200px, 45dvh) minmax(200px, 45dvh);
+  }
+
+  .editor-shell--split .editor {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
   }
 
   .toc-panel {

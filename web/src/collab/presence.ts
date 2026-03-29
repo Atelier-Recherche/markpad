@@ -6,13 +6,30 @@ export interface PresenceUser {
   color: string;
 }
 
-export const extractPresence = (awareness: Awareness): PresenceUser[] => {
-  return [...awareness.getStates().entries()].map(([clientId, state]) => {
+/** Exclut le client local et les entrées awareness « vides » (fantômes / états incomplets). */
+export const extractPresence = (
+  awareness: Awareness,
+  localClientId: number
+): PresenceUser[] => {
+  const out: PresenceUser[] = [];
+  for (const [clientId, state] of awareness.getStates()) {
+    if (clientId === localClientId) continue;
     const user = (state?.user ?? {}) as { name?: string; color?: string };
-    return {
+    const hasCursor =
+      state != null &&
+      typeof state === "object" &&
+      (state as { cursor?: unknown }).cursor != null &&
+      typeof (state as { cursor?: { anchor?: unknown; head?: unknown } }).cursor ===
+        "object";
+    const hasUser =
+      typeof user.name === "string" && user.name.trim().length > 0;
+    if (!hasUser && !hasCursor) continue;
+
+    out.push({
       id: String(clientId),
-      name: user.name ?? "Anonymous",
+      name: hasUser ? user.name!.trim() : "Invité",
       color: user.color ?? "#7c3aed"
-    };
-  });
+    });
+  }
+  return out;
 };

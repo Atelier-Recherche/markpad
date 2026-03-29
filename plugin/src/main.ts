@@ -9,7 +9,18 @@ import {
 } from "obsidian";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
-import { createCollabExtension, setEditorExtensions } from "./codemirrorBinding";
+import {
+  mountCollabExtension,
+  resolveObsidianEditorView,
+  unmountCollabExtension
+} from "./codemirrorBinding";
+import {
+  debugOriginLabel,
+  markpadCollabDebug,
+  setMarkpadCollabDebug
+} from "./markpadDebug";
+import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbound";
+import { reconcileLocalMarkdownIntoY } from "./reconcile";
 import { createShareSession, endShareSession } from "./shareSession";
 import {
   DEFAULT_SETTINGS,
@@ -24,6 +35,9 @@ type ActiveRuntime = {
   roomPassword?: string;
   doc: Y.Doc;
   provider: WebsocketProvider;
+  cmView: import("@codemirror/view").EditorView;
+  /** Retire les écouteurs Y.Doc si logs diagnostic */
+  debugUnload?: () => void;
 };
 
 type PersistedShare = {
@@ -38,6 +52,7 @@ export default class MarkpadPlugin extends Plugin {
   private statusBarEl: HTMLElement | null = null;
   private decoratedEls = new Set<HTMLElement>();
   private sharedNotes = new Map<string, PersistedShare>();
+  private autoConnectTimer: ReturnType<typeof window.setTimeout> | null = null;
 
   public constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
@@ -45,6 +60,7 @@ export default class MarkpadPlugin extends Plugin {
 
   public async onload(): Promise<void> {
     await this.loadSettings();
+    setMarkpadCollabDebug(this.settings.debugCollab);
     this.addSettingTab(new MarkpadSettingTab(this.app, this));
     this.statusBarEl = this.addStatusBarItem();
     this.updateStatusBar("off");
@@ -74,6 +90,21 @@ export default class MarkpadPlugin extends Plugin {
       name: "Stop Sharing Current Note",
       callback: () => void this.stopSharingCurrentNote()
     });
+
+    this.registerEvent(
+      this.app.workspace.on("editor-change", (editor, info) => {
+        if (!this.settings.debugCollab || !this.activeRuntime) return;
+        const path = info.file?.path;
+        if (path !== this.activeRuntime.filePath) return;
+        const cmText = editor.getValue();
+        const yText = this.activeRuntime.doc.getText("content").toString();
+        markpadCollabDebug("workspace editor-change", {
+          cmLen: cmText.length,
+          yLen: yText.length,
+          same: cmText === yText
+        });
+      })
+    );
 
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
@@ -153,14 +184,27 @@ export default class MarkpadPlugin extends Plugin {
       })
     );
     this.decorateSharedUi();
+    this.app.workspace.onLayoutReady(() => {
+      this.queueAutoConnect();
+    });
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.queueAutoConnect();
+      })
+    );
   }
 
   public onunload(): void {
+    if (this.autoConnectTimer != null) {
+      window.clearTimeout(this.autoConnectTimer);
+      this.autoConnectTimer = null;
+    }
     this.disconnect();
   }
 
   public async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    setMarkpadCollabDebug(this.settings.debugCollab);
   }
 
   private async loadSettings(): Promise<void> {
@@ -180,6 +224,195 @@ export default class MarkpadPlugin extends Plugin {
 
   private isMarkdownFile(file: TAbstractFile): file is TFile {
     return file instanceof TFile && file.extension.toLowerCase() === "md";
+  }
+
+  /** Laisse Obsidian mettre à jour le buffer après une écriture disque (ex. frontmatter). */
+  private async flushEditorAfterVaultWrite(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+  }
+
+  private queueAutoConnect(): void {
+    if (this.autoConnectTimer != null) {
+      window.clearTimeout(this.autoConnectTimer);
+    }
+    this.autoConnectTimer = window.setTimeout(() => {
+      this.autoConnectTimer = null;
+      void this.tryAutoConnectActiveFile();
+    }, 450);
+  }
+
+  private async tryAutoConnectActiveFile(): Promise<void> {
+    if (!this.settings.autoReconnect || !this.settings.userId) return;
+    const active = this.getActiveMarkdownFileAndView();
+    if (!active) return;
+    const share = this.sharedNotes.get(active.file.path);
+    if (!share) return;
+
+    if (this.activeRuntime?.filePath === active.file.path) {
+      if (this.activeRuntime.provider.wsconnected) return;
+      this.activeRuntime.provider.connect();
+      return;
+    }
+
+    if (this.activeRuntime) {
+      this.disconnect();
+    }
+
+    try {
+      await this.attachSharedSession(active.file, active.view, share.roomId, share.shareUrl, {
+        roomPassword: this.settings.defaultRoomPassword || undefined,
+        seedFullFromEditor: false
+      });
+    } catch (error) {
+      const msg = (error as Error).message;
+      if (msg !== "no_cm") {
+        new Notice(`Markpad auto-connect: ${msg}`);
+      }
+    }
+  }
+
+  private schedulePostSyncReconcile(
+    file: TFile,
+    doc: Y.Doc,
+    yText: Y.Text,
+    provider: WebsocketProvider
+  ): void {
+    let ran = false;
+    const run = async () => {
+      if (ran) return;
+      ran = true;
+      this.updateStatusBar("syncing");
+      markpadCollabDebug("postSync reconcile: démarrage", { path: file.path });
+      try {
+        const local = await this.app.vault.read(file);
+        const yBefore = yText.toString().length;
+        const changed = reconcileLocalMarkdownIntoY(doc, yText, local);
+        const yAfter = yText.toString().length;
+        markpadCollabDebug("postSync reconcile: fin", {
+          changed,
+          localLen: local.length,
+          yLenBefore: yBefore,
+          yLenAfter: yAfter
+        });
+      } catch (e) {
+        markpadCollabDebug("postSync reconcile: erreur", e);
+      } finally {
+        if (this.activeRuntime?.provider === provider) {
+          this.updatePresenceInStatusBar(provider);
+        }
+      }
+    };
+    const onSync = (synced: boolean) => {
+      markpadCollabDebug("WebsocketProvider sync", {
+        synced,
+        wsconnected: provider.wsconnected
+      });
+      if (synced) void run();
+    };
+    provider.on("sync", onSync);
+    if (provider.synced) void run();
+  }
+
+  private async attachSharedSession(
+    file: TFile,
+    view: MarkdownView,
+    roomId: string,
+    shareUrl: string,
+    options: { roomPassword?: string; seedFullFromEditor?: boolean }
+  ): Promise<void> {
+    const wsBase = this.settings.serverUrl.replace(/^http/i, "ws");
+    const doc = new Y.Doc();
+    const yText = doc.getText("content");
+    if (options.seedFullFromEditor) {
+      const full = view.editor.getValue();
+      if (full.length > 0) {
+        yText.insert(0, full);
+      }
+    }
+    const provider = new WebsocketProvider(`${wsBase}/ws`, roomId, doc, {
+      params: {
+        userId: this.settings.userId,
+        name: this.settings.displayName,
+        color: this.settings.color,
+        password: options.roomPassword ?? ""
+      }
+    });
+    patchYWebsocketProviderOutbound(provider);
+    markpadCollabDebug("patchYWebsocketProviderOutbound appliqué (envoi Y → WS via origin !== provider)");
+
+    provider.awareness.setLocalStateField("user", {
+      name: this.settings.displayName,
+      color: this.settings.color
+    });
+    provider.awareness.on("change", () => this.updatePresenceInStatusBar(provider));
+    provider.on("status", (event: { status: "connected" | "disconnected" | "connecting" }) => {
+      markpadCollabDebug("WebsocketProvider status", event);
+      if (event.status === "connected") {
+        this.updatePresenceInStatusBar(provider);
+        return;
+      }
+      if (event.status === "connecting") {
+        this.updateStatusBar("connecting");
+        return;
+      }
+      this.updateStatusBar("offline");
+    });
+
+    markpadCollabDebug("attachSharedSession", {
+      roomId,
+      seedFullFromEditor: options.seedFullFromEditor,
+      editorValueLen: view.editor.getValue().length,
+      getMode: view.getMode?.()
+    });
+
+    const cm = resolveObsidianEditorView(view);
+    if (!cm) {
+      provider.destroy();
+      doc.destroy();
+      new Notice("Impossible de lier CodeMirror pour cette vue.");
+      throw new Error("no_cm");
+    }
+
+    mountCollabExtension(cm, doc, provider.awareness);
+    markpadCollabDebug("collab montée sur EditorView", {
+      cmDocLen: cm.state.doc.toString().length,
+      yLen: yText.toString().length
+    });
+
+    let debugUnload: (() => void) | undefined;
+    if (this.settings.debugCollab) {
+      const onYUpdate = (update: Uint8Array, origin: unknown): void => {
+        markpadCollabDebug("Y.Doc update (encode)", {
+          updateBytes: update.length,
+          origin: debugOriginLabel(origin),
+          originIsProvider: origin === provider,
+          ywebsocketWouldSkipSend: origin === provider
+        });
+      };
+      doc.on("update", onYUpdate);
+      debugUnload = () => {
+        doc.off("update", onYUpdate);
+      };
+    }
+
+    this.activeRuntime = {
+      filePath: file.path,
+      shareUrl,
+      roomId,
+      roomPassword: options.roomPassword,
+      doc,
+      provider,
+      cmView: cm,
+      debugUnload
+    };
+    this.sharedNotes.set(file.path, { roomId, shareUrl });
+    this.schedulePostSyncReconcile(file, doc, yText, provider);
+    this.decorateSharedUi();
+    this.updatePresenceInStatusBar(provider);
   }
 
   private async startSharingFromFile(file: TFile): Promise<void> {
@@ -213,76 +446,25 @@ export default class MarkpadPlugin extends Plugin {
         roomPassword: this.settings.defaultRoomPassword || undefined
       });
 
-      const wsBase = this.settings.serverUrl.replace(/^http/i, "ws");
-      const doc = new Y.Doc();
-      const yText = doc.getText("content");
-      const initialContent = active.view.editor.getValue();
-      if (yText.length === 0 && initialContent.length > 0) {
-        yText.insert(0, initialContent);
-      }
-      const provider = new WebsocketProvider(
-        `${wsBase}/ws`,
-        created.roomId,
-        doc,
-        {
-          params: {
-            userId: this.settings.userId,
-            name: this.settings.displayName,
-            color: this.settings.color,
-            password: this.settings.defaultRoomPassword
-          }
-        }
-      );
-
-      provider.awareness.setLocalStateField("user", {
-        name: this.settings.displayName,
-        color: this.settings.color
-      });
-      provider.awareness.on("change", () => this.updatePresenceInStatusBar(provider));
-      provider.on("status", (event: { status: "connected" | "disconnected" | "connecting" }) => {
-        if (event.status === "connected") {
-          this.updatePresenceInStatusBar(provider);
-          return;
-        }
-        if (event.status === "connecting") {
-          this.updateStatusBar("connecting");
-          return;
-        }
-        this.updateStatusBar("offline");
-      });
-
-      const editorAny = active.view.editor as unknown as { cm?: unknown };
-      const cm = editorAny.cm as import("@codemirror/view").EditorView | null;
-
-      if (!cm) {
-        provider.destroy();
-        doc.destroy();
-        new Notice("Impossible de lier CodeMirror pour cette vue.");
-        return;
-      }
-
-      setEditorExtensions(cm, createCollabExtension(doc, provider.awareness));
-
-      await navigator.clipboard.writeText(created.shareUrl);
-      new Notice(`Lien copié: ${created.shareUrl}`);
-      this.activeRuntime = {
-        filePath: active.file.path,
-        shareUrl: created.shareUrl,
-        roomId: created.roomId,
-        roomPassword: this.settings.defaultRoomPassword || undefined,
-        doc,
-        provider
-      };
-      this.sharedNotes.set(active.file.path, {
-        roomId: created.roomId,
-        shareUrl: created.shareUrl
-      });
       await this.writeShareFrontmatter(active.file, {
         roomId: created.roomId,
         shareUrl: created.shareUrl
       });
-      this.decorateSharedUi();
-      this.updatePresenceInStatusBar(provider);
+      await this.flushEditorAfterVaultWrite();
+
+      await this.attachSharedSession(
+        active.file,
+        active.view,
+        created.roomId,
+        created.shareUrl,
+        {
+          roomPassword: this.settings.defaultRoomPassword || undefined,
+          seedFullFromEditor: true
+        }
+      );
+
+      await navigator.clipboard.writeText(created.shareUrl);
+      new Notice(`Lien copié: ${created.shareUrl}`);
     } catch (error) {
       this.updateStatusBar("error");
       new Notice(`Markpad erreur: ${(error as Error).message}`);
@@ -325,58 +507,14 @@ export default class MarkpadPlugin extends Plugin {
     this.disconnect();
 
     try {
-      const wsBase = this.settings.serverUrl.replace(/^http/i, "ws");
-      const doc = new Y.Doc();
-      const provider = new WebsocketProvider(`${wsBase}/ws`, roomId, doc, {
-        params: {
-          userId: this.settings.userId,
-          name: this.settings.displayName,
-          color: this.settings.color,
-          password: roomPassword
-        }
-      });
-
-      provider.awareness.setLocalStateField("user", {
-        name: this.settings.displayName,
-        color: this.settings.color
-      });
-      provider.awareness.on("change", () => this.updatePresenceInStatusBar(provider));
-      provider.on("status", (event: { status: "connected" | "disconnected" | "connecting" }) => {
-        if (event.status === "connected") {
-          this.updatePresenceInStatusBar(provider);
-          return;
-        }
-        if (event.status === "connecting") {
-          this.updateStatusBar("connecting");
-          return;
-        }
-        this.updateStatusBar("offline");
-      });
-
-      const editorAny = active.view.editor as unknown as { cm?: unknown };
-      const cm = editorAny.cm as import("@codemirror/view").EditorView | null;
-      if (!cm) {
-        provider.destroy();
-        doc.destroy();
-        new Notice("Impossible de lier CodeMirror pour cette vue.");
-        return;
-      }
-
-      setEditorExtensions(cm, createCollabExtension(doc, provider.awareness));
-
       const shareUrl = `${this.settings.serverUrl.replace(/\/$/, "")}/share/${roomId}`;
-      this.activeRuntime = {
-        filePath: active.file.path,
-        shareUrl,
-        roomId,
-        roomPassword: roomPassword || undefined,
-        doc,
-        provider
-      };
-      this.sharedNotes.set(active.file.path, { roomId, shareUrl });
       await this.writeShareFrontmatter(active.file, { roomId, shareUrl });
-      this.decorateSharedUi();
-      this.updatePresenceInStatusBar(provider);
+      await this.flushEditorAfterVaultWrite();
+
+      await this.attachSharedSession(active.file, active.view, roomId, shareUrl, {
+        roomPassword: roomPassword || undefined,
+        seedFullFromEditor: false
+      });
       new Notice("Markpad: session rejointe depuis Obsidian.");
     } catch (error) {
       this.updateStatusBar("error");
@@ -386,6 +524,17 @@ export default class MarkpadPlugin extends Plugin {
 
   private disconnect(): void {
     if (!this.activeRuntime) return;
+    try {
+      this.activeRuntime.debugUnload?.();
+    } catch {
+      // ignore
+    }
+    try {
+      unmountCollabExtension(this.activeRuntime.cmView);
+    } catch {
+      // La vue peut être invalide si l’onglet a été fermé.
+    }
+    markpadCollabDebug("disconnect()");
     this.activeRuntime.provider.destroy();
     this.activeRuntime.doc.destroy();
     this.activeRuntime = null;
@@ -394,13 +543,24 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private updatePresenceInStatusBar(provider: WebsocketProvider): void {
-    const allUsers = Array.from(provider.awareness.getStates().keys());
-    const others = allUsers.filter((id) => id !== provider.doc.clientID).length;
+    const localId = provider.awareness.doc.clientID;
+    let others = 0;
+    for (const [clientId, state] of provider.awareness.getStates()) {
+      if (clientId === localId) continue;
+      const u = (state as { user?: { name?: string }; cursor?: unknown })?.user;
+      const hasName = typeof u?.name === "string" && u.name.trim().length > 0;
+      const hasCursor =
+        state != null &&
+        typeof state === "object" &&
+        (state as { cursor?: unknown }).cursor != null;
+      if (!hasName && !hasCursor) continue;
+      others += 1;
+    }
     this.updateStatusBar("connected", others);
   }
 
   private updateStatusBar(
-    status: "off" | "connecting" | "connected" | "offline" | "error",
+    status: "off" | "connecting" | "connected" | "offline" | "error" | "syncing",
     remoteCount = 0
   ): void {
     if (!this.statusBarEl) return;
@@ -410,6 +570,9 @@ export default class MarkpadPlugin extends Plugin {
         break;
       case "connecting":
         this.statusBarEl.setText("Markpad: connexion...");
+        break;
+      case "syncing":
+        this.statusBarEl.setText("Markpad: synchronisation…");
         break;
       case "connected":
         this.statusBarEl.setText(`Markpad: en ligne (${remoteCount + 1})`);
@@ -484,15 +647,25 @@ export default class MarkpadPlugin extends Plugin {
       new Notice("Markpad: aucun partage actif.");
       return;
     }
-    const states = Array.from(this.activeRuntime.provider.awareness.getStates().values());
-    const names = states
-      .map((state) => (state.user as { name?: string } | undefined)?.name ?? "Anonymous")
-      .filter((name, idx, arr) => arr.indexOf(name) === idx);
-    if (names.length === 0) {
-      new Notice("Markpad: aucun participant connecté.");
+    const localId = this.activeRuntime.provider.awareness.doc.clientID;
+    const names: string[] = [];
+    for (const [clientId, state] of this.activeRuntime.provider.awareness.getStates()) {
+      if (clientId === localId) continue;
+      const u = (state as { user?: { name?: string }; cursor?: unknown })?.user;
+      const hasName = typeof u?.name === "string" && u.name.trim().length > 0;
+      const hasCursor =
+        state != null &&
+        typeof state === "object" &&
+        (state as { cursor?: unknown }).cursor != null;
+      if (!hasName && !hasCursor) continue;
+      names.push(hasName ? u!.name!.trim() : "Invité");
+    }
+    const unique = names.filter((n, i, a) => a.indexOf(n) === i);
+    if (unique.length === 0) {
+      new Notice("Markpad: aucun autre participant connecté.");
       return;
     }
-    new Notice(`Connectés: ${names.join(", ")}`);
+    new Notice(`Autres connectés: ${unique.join(", ")}`);
   }
 
   private clearDecorations(): void {

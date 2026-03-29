@@ -4,7 +4,7 @@ Markpad est un mono-repo de collaboration temps reel pour notes Markdown avec 3 
 
 - `plugin/` : plugin Obsidian (source de partage)
 - `server/` : backend Node.js + Yjs + WebSocket + Redis
-- `web/` : frontend React + CodeMirror 6 pour les invites
+- `web/` : frontend React + CodeMirror 6 (markdown source, collab Yjs) + aperçu HTML, barre d’outils type Obsidian (icônes [Lucide](https://lucide.dev/))
 
 ## Architecture
 
@@ -13,6 +13,15 @@ Markpad est un mono-repo de collaboration temps reel pour notes Markdown avec 3 
 - Plugin et Web se connectent au WebSocket de la room.
 - Les updates Yjs sont relayees en temps reel.
 - L'etat Yjs est persiste dans Redis pour reprise de session.
+- Le plugin enregistre `markpadShare` dans le frontmatter (`roomId`, `shareUrl`) pour retrouver la room à l'ouverture de la note.
+
+### Plugin Obsidian : sync et reconnexion
+
+- **Reconnexion automatique** (paramètre dans les réglages du plugin, activé par défaut) : si la note active contient déjà un partage et que `User ID` est renseigné, le plugin ouvre la session WebSocket au démarrage / au changement de note, sans relancer « Start Sharing ».
+- **Réconciliation** après le premier sync : le fichier `.md` sur le vault est comparé au corps du document Yjs (hors frontmatter). En cas de divergences (édition hors ligne, Redis vide ou ancien), le plugin applique un fusionnement par patches (diff-match-patch) dans Yjs pour limiter les pertes au lieu d’écraser un côté. Si Yjs est vide et la note locale non vide, le contenu local est réinjecté (protection **anti-vide** après redémarrage Redis/serveur).
+- **Barre d’état** : affiche notamment connecté, synchronisation en cours, ou hors ligne.
+- **Sens Obsidian → Web** : en plus de y-codemirror, un petit module CodeMirror réaligne `Y.Text` sur le document si la frappe locale et Y divergent (contourne des cas où le binding CM→Y ne propage pas, selon la version Obsidian / Live Preview). La bonne instance `EditorView` est résolue (source, `editorComponent`, sous-mode d’édition) avant de monter la collab.
+- **Dépannage** : dans les réglages du plugin, activer « Logs diagnostic (console) », ouvrir la console développeur (Ctrl+Shift+I), filtrer sur `Markpad:collab` : tu verras les événements horodatés (résolution CM, pont, `Y.Doc update`, WebSocket, `editor-change`).
 
 ## Infrastructure Docker
 
@@ -122,3 +131,4 @@ Ensuite, dans Obsidian :
 - La persistance des rooms est faite via Redis.
 - Le frontend est servi en statique via Nginx.
 - Le serveur applique des controles d'acces de base via API key + mot de passe optionnel de room.
+- Sur le web, l’éditeur est le **texte brut Markdown** dans `Y.Text` (comme Obsidian en mode source), ce qui aligne la collab avec le plugin.
