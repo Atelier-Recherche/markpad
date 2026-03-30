@@ -1,12 +1,16 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type MarkpadPlugin from "./main";
 
+import { t, type LocaleId } from "./locale";
+
 export interface MarkpadSettings {
   serverUrl: string;
   apiKey: string;
   userId: string;
   displayName: string;
   color: string;
+  /** Interface plugin (réglages, commandes). */
+  locale: LocaleId;
   defaultRoomPassword: string;
   /** Reconnecter automatiquement au WebSocket quand une note avec markpadShare est ouverte */
   autoReconnect: boolean;
@@ -20,6 +24,7 @@ export const DEFAULT_SETTINGS: MarkpadSettings = {
   userId: "",
   displayName: "Obsidian User",
   color: "#7c3aed",
+  locale: "fr",
   defaultRoomPassword: "",
   autoReconnect: true,
   debugCollab: false
@@ -33,9 +38,27 @@ export class MarkpadSettingTab extends PluginSettingTab {
   public display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    const L = this.plugin.settings.locale;
 
     new Setting(containerEl)
-      .setName("Server URL")
+      .setName(t(L, "language"))
+      .setDesc("Interface du plugin (réglages et noms de commandes).")
+      .addDropdown((drop) =>
+        drop
+          .addOption("fr", "Français")
+          .addOption("en", "English")
+          .addOption("es", "Español")
+          .addOption("de", "Deutsch")
+          .setValue(this.plugin.settings.locale)
+          .onChange(async (value) => {
+            this.plugin.settings.locale = value as typeof this.plugin.settings.locale;
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(t(L, "serverUrl"))
       .setDesc("Adresse du serveur Markpad.")
       .addText((text) =>
         text.setValue(this.plugin.settings.serverUrl).onChange(async (value) => {
@@ -45,8 +68,8 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("API Key")
-      .setDesc("Clé API utilisée pour créer les sessions.")
+      .setName(t(L, "apiKey"))
+      .setDesc(t(L, "apiKeyDesc"))
       .addText((text) =>
         text.setValue(this.plugin.settings.apiKey).onChange(async (value) => {
           this.plugin.settings.apiKey = value.trim();
@@ -55,7 +78,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("User ID")
+      .setName(t(L, "userId"))
       .setDesc("Identifiant unique de l'utilisateur.")
       .addText((text) =>
         text.setValue(this.plugin.settings.userId).onChange(async (value) => {
@@ -65,7 +88,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Display name")
+      .setName(t(L, "displayName"))
       .setDesc("Nom affiché pour les curseurs distants.")
       .addText((text) =>
         text
@@ -77,7 +100,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Cursor color")
+      .setName(t(L, "cursorColor"))
       .setDesc("Couleur utilisée pour le curseur local.")
       .addText((text) =>
         text.setValue(this.plugin.settings.color).onChange(async (value) => {
@@ -87,7 +110,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Default room password")
+      .setName(t(L, "defaultRoomPassword"))
       .setDesc("Mot de passe optionnel appliqué par défaut aux partages.")
       .addText((text) =>
         text
@@ -100,7 +123,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Reconnexion auto")
+      .setName(t(L, "autoReconnect"))
       .setDesc(
         "Si une note contient markpadShare dans le frontmatter, reconnecter le WebSocket à l’ouverture (user ID requis ; mot de passe = défaut ci-dessus)."
       )
@@ -112,7 +135,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Logs diagnostic (console)")
+      .setName(t(L, "debugLogs"))
       .setDesc(
         "Affiche dans la console développeur (Ctrl+Shift+I) des messages horodatés : résolution CodeMirror, pont CM→Y, mises à jour Y.Doc, sync WebSocket. Désactive quand tu as fini de déboguer."
       )

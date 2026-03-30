@@ -31,14 +31,44 @@ Markpad est un mono-repo de collaboration temps reel pour notes Markdown avec 3 
 - `server` : API + WebSocket, expose `1234`
 - `web` : frontend statique Nginx, expose `WEB_PORT` (defaut `8080`)
 
-Variables principales (voir `.env.example`) :
+Variables principales (voir [`.env.example`](.env.example)) :
 
-- `SERVER_PORT`
+- `SERVER_PORT`, `SERVER_HOST`
 - `WEB_PORT`
-- `PUBLIC_SERVER_URL`
-- `PUBLIC_WEB_URL`
+- `PUBLIC_SERVER_URL`, `PUBLIC_WEB_URL`
 - `ALLOWED_API_KEYS`
 - `REDIS_URL`
+- `SESSION_MAX_IDLE_MS` — durée sans activité avant suppression de la room (défaut ~1 an)
+- `SESSION_CLEANUP_INTERVAL_MS` — fréquence du nettoyage des rooms expirées
+- `JWT_SECRET` — signature des jetons web (connexion par e-mail)
+- `ADMIN_EMAILS` — liste d’e-mails (séparés par des virgules) ayant le rôle admin à la première connexion
+- `MARKPAD_SQLITE_PATH` — fichier SQLite (métadonnées partages, utilisateurs, index)
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` — envoi des liens magiques (optionnel ; sans SMTP le lien est loggé dans la console serveur). **Important** : l’hôte SMTP est en général celui du **fournisseur de messagerie** (ex. `smtp.…`, `ssl0.ovh.net` pour une boîte OVH), pas forcément le nom de domaine du site seul ; si le port **465** ne se connecte pas, essayez **587** avec `SMTP_SECURE=false` (STARTTLS). Voir aussi `SMTP_CONNECTION_TIMEOUT_MS` dans `.env.example`.
+
+## Web : interface invité
+
+- **Langue** : français, anglais, espagnol, allemand (sélecteur dans la barre du haut, mémorisé dans `localStorage`).
+- **Nom affiché** : mémorisé (`markpad-display-name`). Si la room n’a **pas** de mot de passe, la connexion se fait sans écran « Rejoindre ». **Clic droit** sur la pastille « Vous » pour renommer.
+- **Panneaux** : arborescence (partage dossier), éditeur, aperçu, plan — largeurs ajustables par poignées entre colonnes (jusqu’à ~72 % pour les panneaux latéraux).
+- **Routes utiles** : `/share/:roomId` (édition collaborative), `/auth/verify?token=…` (après le lien reçu par e-mail), `/me` (liste des partages avec un compte web), `/admin` (administration — voir ci‑dessous).
+
+## Compte web et liste des partages
+
+1. `POST /auth/magic/request` avec `{ "email": "vous@exemple.com" }` (ou utiliser la page **`/me`** dans l’app web pour saisir l’e‑mail).
+2. Ouvrir le lien reçu (ou celui affiché dans les **logs du serveur** si SMTP n’est pas configuré) : **`/auth/verify?token=…`** retourne un **JWT** et l’**id utilisateur** ; le jeton est stocké côté navigateur (`localStorage`, clé `markpad-jwt`).
+3. **`GET /me/shares`** (en-tête `Authorization: Bearer <JWT>`) liste les partages dont le propriétaire est le même **`User ID`** que celui configuré dans le plugin Obsidian (copier l’id affiché après vérification dans les réglages du plugin).
+
+## Compte administrateur (web)
+
+- Renseigner **`ADMIN_EMAILS`** avec votre adresse (ex. `vous@exemple.com`) dans `.env`, **ou** promouvoir un utilisateur en base (champ `is_admin` sur la table `users`).
+- Se connecter avec le **lien magique** comme n’importe quel utilisateur (même adresse que dans `ADMIN_EMAILS` si vous utilisez cette méthode).
+- Appeler les routes **`/admin/shares`**, **`/admin/users`**, **`DELETE /admin/sessions/:roomId`**, etc. avec le même **`Authorization: Bearer <JWT>`** que pour `/me`. La page **`/admin`** du frontend affiche un aperçu JSON (à compléter selon vos besoins).
+
+## Plugin Obsidian : partage dossier et panneau des partages
+
+- **Partager un dossier** : clic droit sur le dossier dans l’explorateur → « Markpad : partager ce dossier ». Un fichier **`.markpad-folder-share.md`** est créé dans le dossier ; les notes `.md` du dossier sont synchronisées dans une même room Yjs (`Y.Map` `files`).
+- **Dossier déjà partagé** : le même menu contextuel propose **copier le lien** et **arrêter le partage du dossier**.
+- **Panneau latéral** : commande **« Ouvrir le panneau des partages »** — liste tous les partages (notes et dossiers) avec **copier le lien** et **supprimer le partage** (côté serveur + nettoyage local).
 
 ## Prerequis
 
@@ -125,6 +155,10 @@ Ensuite, dans Obsidian :
 - Server dev : `npm run -w server dev`
 - Web dev : `npm run -w web dev`
 - Plugin watch : `npm run -w plugin dev`
+
+## Sauvegardes et durabilité des données
+
+Les rôles du vault Obsidian, de Redis, de SQLite et les recommandations de sauvegarde sont décrits dans **[docs/strategies-sauvegarde.md](docs/strategies-sauvegarde.md)**.
 
 ## Notes
 

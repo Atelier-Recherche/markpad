@@ -12,7 +12,8 @@
     "lint": "npm run -w server lint && npm run -w web lint && npm run -w plugin lint",
     "dev:server": "npm run -w server dev",
     "dev:web": "npm run -w web dev",
-    "dev:plugin": "npm run -w plugin dev"
+    "dev:plugin": "npm run -w plugin dev",
+    "test-smtp": "npm run test-smtp -w server"
   },
   "overrides": {
     "@codemirror/state": "6.5.0",

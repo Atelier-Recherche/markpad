@@ -8,6 +8,8 @@ import type { WebSocket, WebSocketServer } from "ws";
 import { RedisDocStore } from "../persistence/redisDocStore.js";
 import { SessionStore } from "../sessionStore.js";
 
+const TOUCH_THROTTLE_MS = 60_000;
+
 type RoomRuntime = {
   doc: Y.Doc;
   awareness: awarenessProtocol.Awareness;
@@ -28,6 +30,7 @@ const MESSAGE_QUERY_AWARENESS = 3;
 
 export class MarkpadYjsServer {
   private readonly rooms = new Map<string, RoomRuntime>();
+  private readonly lastTouchThrottle = new Map<string, number>();
 
   public constructor(
     private readonly wss: WebSocketServer,
@@ -52,6 +55,14 @@ export class MarkpadYjsServer {
 
       void this.attach(roomId, password, ws);
     });
+  }
+
+  private maybeTouchActivity(roomId: string): void {
+    const now = Date.now();
+    const prev = this.lastTouchThrottle.get(roomId) ?? 0;
+    if (now - prev < TOUCH_THROTTLE_MS) return;
+    this.lastTouchThrottle.set(roomId, now);
+    void this.sessions.touchActivity(roomId);
   }
 
   private async attach(
@@ -122,6 +133,7 @@ export class MarkpadYjsServer {
 
     room.clients.add(ws);
     room.awarenessClientsBySocket.set(ws, new Set());
+    this.maybeTouchActivity(roomId);
 
     ws.on("message", (raw) => {
       const rawBytes =
@@ -147,6 +159,7 @@ export class MarkpadYjsServer {
             ws.send(encoding.toUint8Array(encoder));
           }
           void this.docs.save(roomId, room.doc);
+          this.maybeTouchActivity(roomId);
           break;
         }
         case MESSAGE_AWARENESS: {

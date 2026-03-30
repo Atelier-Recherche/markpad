@@ -9,7 +9,8 @@ export interface PresenceUser {
 /** Exclut le client local et les entrées awareness « vides » (fantômes / états incomplets). */
 export const extractPresence = (
   awareness: Awareness,
-  localClientId: number
+  localClientId: number,
+  guestLabel = "Invité"
 ): PresenceUser[] => {
   const out: PresenceUser[] = [];
   for (const [clientId, state] of awareness.getStates()) {
@@ -27,7 +28,7 @@ export const extractPresence = (
 
     out.push({
       id: String(clientId),
-      name: hasUser ? user.name!.trim() : "Invité",
+      name: hasUser ? user.name!.trim() : guestLabel,
       color: user.color ?? "#7c3aed"
     });
   }

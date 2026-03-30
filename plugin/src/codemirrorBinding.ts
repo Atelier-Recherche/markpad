@@ -92,6 +92,13 @@ const markpadCmYBridge = ViewPlugin.fromClass(MarkpadCmYBridge);
 
 export const createCollabExtension = (doc: Y.Doc, awareness: unknown): Extension[] => {
   const yText = doc.getText("content");
+  return createCollabExtensionForYText(yText, awareness);
+};
+
+export const createCollabExtensionForYText = (
+  yText: Y.Text,
+  awareness: unknown
+): Extension[] => {
   const base = yCollab(yText, awareness as any, {
     drawSelection: true,
     getUserColor: (user: RemoteUser) => user.color ?? "#7c3aed",
@@ -99,6 +106,26 @@ export const createCollabExtension = (doc: Y.Doc, awareness: unknown): Extension
   });
   const flat = (Array.isArray(base) ? base : [base]) as Extension[];
   return [...flat, markpadCmYBridge];
+};
+
+export const mountCollabExtensionWithYText = (
+  view: EditorView,
+  yText: Y.Text,
+  awareness: unknown
+): void => {
+  const ext = createCollabExtensionForYText(yText, awareness);
+  let compartment = compartmentByView.get(view);
+  if (!compartment) {
+    compartment = new Compartment();
+    compartmentByView.set(view, compartment);
+    view.dispatch({
+      effects: StateEffect.appendConfig.of(compartment.of(ext))
+    });
+    return;
+  }
+  view.dispatch({
+    effects: compartment.reconfigure(ext)
+  });
 };
 
 export const mountCollabExtension = (

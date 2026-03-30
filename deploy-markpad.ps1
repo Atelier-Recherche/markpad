@@ -1,5 +1,6 @@
 param(
   [string]$VaultPluginsPath = "D:\Notes\.obsidian\plugins",
+  [string[]]$AdditionalVaultPluginsPaths = @("D:\Notes\abécédaire\.obsidian\plugins"),
   [string]$PluginId = "markpad",
   [ValidateSet("all", "server", "web", "plugin")]
   [string]$Target = "all",
@@ -80,6 +81,22 @@ function Deploy-PluginToVault {
   Write-Host "Plugin deploye dans: $pluginTargetDir" -ForegroundColor Green
 }
 
+function Deploy-PluginToVaults {
+  param(
+    [string]$RootPath,
+    [string]$PrimaryVaultPath,
+    [string[]]$ExtraVaultPaths,
+    [string]$PluginName
+  )
+
+  $allVaults = @($PrimaryVaultPath) + @($ExtraVaultPaths)
+  $allVaults = $allVaults | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+  foreach ($vault in $allVaults) {
+    Deploy-PluginToVault -RootPath $RootPath -VaultPath $vault -PluginName $PluginName
+  }
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptRoot
 
@@ -104,7 +121,7 @@ switch ($Target) {
       Ensure-EnvFile -RootPath $scriptRoot
       Invoke-Step "Build + lancement de toute la stack Docker" "docker compose up --build -d"
     }
-    Deploy-PluginToVault -RootPath $scriptRoot -VaultPath $VaultPluginsPath -PluginName $PluginId
+    Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
   }
   "server" {
     Invoke-Step "Build du service server" "npm run -w server build"
@@ -114,7 +131,7 @@ switch ($Target) {
     }
     if ($DeployPluginAfterServiceBuild) {
       Invoke-Step "Build du plugin" "npm run -w plugin build"
-      Deploy-PluginToVault -RootPath $scriptRoot -VaultPath $VaultPluginsPath -PluginName $PluginId
+      Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
     }
   }
   "web" {
@@ -125,12 +142,12 @@ switch ($Target) {
     }
     if ($DeployPluginAfterServiceBuild) {
       Invoke-Step "Build du plugin" "npm run -w plugin build"
-      Deploy-PluginToVault -RootPath $scriptRoot -VaultPath $VaultPluginsPath -PluginName $PluginId
+      Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
     }
   }
   "plugin" {
     Invoke-Step "Build du plugin" "npm run -w plugin build"
-    Deploy-PluginToVault -RootPath $scriptRoot -VaultPath $VaultPluginsPath -PluginName $PluginId
+    Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
   }
   default {
     throw "Target inconnu: $Target"
@@ -140,4 +157,6 @@ switch ($Target) {
 Write-Step "Termine"
 if (-not $SkipDocker -and $Target -ne "plugin") {
   Write-Host "Services Docker actifs. Verifie avec: docker compose ps" -ForegroundColor Green
+  Write-Host "Logs serveur (SMTP, erreurs): docker compose logs -f server" -ForegroundColor DarkGray
+  Write-Host "Sante API: curl http://localhost:1234/healthz  (smtpConfigured doit etre true si SMTP est renseigne)" -ForegroundColor DarkGray
 }

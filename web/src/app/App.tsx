@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { marked } from "marked";
 import {
@@ -22,16 +23,32 @@ import {
   TextQuote,
   Wifi,
   WifiOff,
-  Hash
+  Hash,
+  Languages,
+  FolderTree
 } from "lucide-react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { createCollabEditor, type CollabRuntime } from "../collab/editor";
 import { getFrontmatterPrefixLength } from "../collab/frontmatter";
+import { SUPPORTED_LOCALES, setLocale, type SupportedLocale } from "../i18n/index";
+import { FileTreePanel } from "./FileTreePanel";
+
+const DISPLAY_NAME_KEY = "markpad-display-name";
+const UI_ONBOARDING_KEY = "markpad-ui-onboarding";
+
+const hasCompletedUiOnboarding = (): boolean => {
+  try {
+    return localStorage.getItem(UI_ONBOARDING_KEY) === "1";
+  } catch {
+    return true;
+  }
+};
 
 type ConnectionStatus = "connected" | "offline";
-/** Comme Obsidian : édition (source CM6), lecture (aperçu), ou scission. */
 type ViewMode = "edit" | "preview" | "split";
 type ThemeMode = "dark" | "light";
 type TocItem = { id: string; level: number; text: string };
+type JoinGate = "checking" | "open" | "password" | "missing" | "error";
 
 const randomId = (): string => {
   const rnd = crypto.getRandomValues(new Uint32Array(2));
@@ -41,31 +58,163 @@ const randomId = (): string => {
 const iconBtnClass = (active: boolean): string =>
   `obsidian-tool ${active ? "obsidian-tool--active" : ""}`;
 
+const getStableUserId = (): string => {
+  const key = "markpad-user-id";
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = randomId();
+    sessionStorage.setItem(key, id);
+  }
+  return id;
+};
+
 export const App = () => {
+  const { t, i18n } = useTranslation();
   const { roomId = "" } = useParams();
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const stableUserId = useMemo(() => getStableUserId(), []);
+
   const [status, setStatus] = useState<ConnectionStatus>("offline");
   const [password, setPassword] = useState("");
   const [presence, setPresence] = useState<
     Array<{ id: string; name: string; color: string }>
   >([]);
   const [started, setStarted] = useState(false);
-  const [name, setName] = useState("Guest");
+  const [name, setName] = useState(() => localStorage.getItem(DISPLAY_NAME_KEY) ?? "");
   const [markdown, setMarkdown] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (!hasCompletedUiOnboarding()) return "edit";
+    const s = localStorage.getItem("markpad-view-mode");
+    if (s === "edit" || s === "preview" || s === "split") return s;
+    return "split";
+  });
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem("markpad-theme");
     return stored === "light" ? "light" : "dark";
   });
-  const [tocOpen, setTocOpen] = useState(true);
-  const [hideFrontmatter, setHideFrontmatter] = useState(false);
-  const [showLineNumbers, setShowLineNumbers] = useState(true);
+  const [tocOpen, setTocOpen] = useState(() => {
+    if (!hasCompletedUiOnboarding()) return false;
+    return localStorage.getItem("markpad-toc-open") !== "false";
+  });
+  const [treeOpen, setTreeOpen] = useState(() => {
+    if (!hasCompletedUiOnboarding()) return false;
+    return localStorage.getItem("markpad-tree-open") !== "false";
+  });
+  const [hideFrontmatter, setHideFrontmatter] = useState(true);
+  const [showLineNumbers, setShowLineNumbers] = useState(() => {
+    if (!hasCompletedUiOnboarding()) return false;
+    return localStorage.getItem("markpad-line-numbers") !== "false";
+  });
   const [runtime, setRuntime] = useState<CollabRuntime | null>(null);
+  const [joinGate, setJoinGate] = useState<JoinGate>("checking");
+  const [folderMode, setFolderMode] = useState(false);
+  const [folderPaths, setFolderPaths] = useState<string[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+
+  const showEditor = viewMode === "edit" || viewMode === "split";
+  const showPreview = viewMode === "preview" || viewMode === "split";
+  /** Ne change qu’entre aperçu seul (montage Yjs dérobé) et les modes avec éditeur visible. */
+  const editorMountSurface =
+    !showEditor && showPreview ? "preview-only" : "editor-surface";
+
+  const displayName =
+    name.trim() ||
+    `${t("presence.webTag")} · ${stableUserId.replace(/^web-/, "")}`;
 
   const wsBaseUrl = useMemo(() => {
     const raw = import.meta.env.VITE_SERVER_BASE_URL ?? "http://localhost:1234";
     return String(raw).replace(/^http/i, "ws");
   }, []);
+
+  const httpBaseUrl = useMemo(() => {
+    const raw = import.meta.env.VITE_SERVER_BASE_URL ?? "http://localhost:1234";
+    return String(raw).replace(/\/$/, "");
+  }, []);
+
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+    setJoinGate("checking");
+    setStarted(false);
+
+    const run = async (): Promise<void> => {
+      try {
+        const res = await fetch(`${httpBaseUrl}/sessions/${encodeURIComponent(roomId)}/validate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ roomPassword: "" })
+        });
+        if (cancelled) return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            kind?: string;
+            filePaths?: string[];
+          };
+          if (data.kind === "folder" && Array.isArray(data.filePaths)) {
+            setFolderMode(true);
+            setFolderPaths(data.filePaths);
+            setActiveFilePath(data.filePaths[0] ?? null);
+          } else {
+            setFolderMode(false);
+            setFolderPaths([]);
+            setActiveFilePath(null);
+          }
+          const stored = localStorage.getItem(DISPLAY_NAME_KEY) ?? "";
+          if (stored) setName(stored);
+          setStarted(true);
+          setJoinGate("open");
+          return;
+        }
+        if (res.status === 401) {
+          setFolderMode(false);
+          setJoinGate("password");
+          return;
+        }
+        if (res.status === 404) {
+          setJoinGate("missing");
+          return;
+        }
+        setJoinGate("error");
+      } catch {
+        if (!cancelled) setJoinGate("error");
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, httpBaseUrl]);
+
+  useEffect(() => {
+    localStorage.setItem(DISPLAY_NAME_KEY, name);
+  }, [name]);
+
+  useEffect(() => {
+    localStorage.setItem("markpad-view-mode", viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    localStorage.setItem("markpad-toc-open", tocOpen ? "true" : "false");
+  }, [tocOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("markpad-tree-open", treeOpen ? "true" : "false");
+  }, [treeOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("markpad-line-numbers", showLineNumbers ? "true" : "false");
+  }, [showLineNumbers]);
+
+  useEffect(() => {
+    if (started) {
+      try {
+        localStorage.setItem(UI_ONBOARDING_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [started]);
 
   useEffect(() => {
     if (!started || !mountRef.current || !roomId) return;
@@ -73,22 +222,51 @@ export const App = () => {
       parent: mountRef.current,
       wsBaseUrl,
       roomId,
-      userId: randomId(),
-      name,
+      userId: stableUserId,
+      name: displayName,
       color: "#0ea5e9",
       password,
       initialHideFrontmatter: hideFrontmatter,
       initialShowLineNumbers: showLineNumbers,
       onStatus: setStatus,
       onPresence: setPresence,
-      onTextChange: setMarkdown
+      onTextChange: setMarkdown,
+      guestLabel: t("guest"),
+      folderPaths: folderMode ? folderPaths : undefined,
+      activeFilePath: folderMode ? activeFilePath : undefined
     });
     setRuntime(rt);
     return () => {
       setRuntime(null);
       rt.destroy();
     };
-  }, [started, roomId, wsBaseUrl, password]);
+  }, [
+    started,
+    roomId,
+    wsBaseUrl,
+    password,
+    stableUserId,
+    folderMode,
+    folderPaths,
+    activeFilePath,
+    hideFrontmatter,
+    showLineNumbers,
+    displayName,
+    editorMountSurface
+  ]);
+
+  useEffect(() => {
+    if (!runtime) return;
+    const id = window.requestAnimationFrame(() => {
+      runtime.refreshLayout();
+      window.requestAnimationFrame(() => runtime.refreshLayout());
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [viewMode, tocOpen, treeOpen, runtime]);
+
+  useEffect(() => {
+    runtime?.setLocalDisplayName(displayName);
+  }, [displayName, runtime]);
 
   useEffect(() => {
     runtime?.setFrontmatterFolded(hideFrontmatter);
@@ -158,48 +336,122 @@ export const App = () => {
     container.scrollTo({ top: el.offsetTop - 12, behavior: "smooth" });
   };
 
-  const showEditor = viewMode === "edit" || viewMode === "split";
-  const showPreview = viewMode === "preview" || viewMode === "split";
+  const tryJoinWithPassword = useCallback(async (): Promise<void> => {
+    if (!roomId) return;
+    try {
+      const res = await fetch(`${httpBaseUrl}/sessions/${encodeURIComponent(roomId)}/validate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomPassword: password })
+      });
+      if (!res.ok) {
+        setJoinGate(res.status === 404 ? "missing" : "password");
+        return;
+      }
+      const data = (await res.json()) as { kind?: string; filePaths?: string[] };
+      if (data.kind === "folder" && Array.isArray(data.filePaths)) {
+        setFolderMode(true);
+        setFolderPaths(data.filePaths);
+        setActiveFilePath(data.filePaths[0] ?? null);
+      } else {
+        setFolderMode(false);
+        setFolderPaths([]);
+        setActiveFilePath(null);
+      }
+      setStarted(true);
+      setJoinGate("open");
+    } catch {
+      setJoinGate("error");
+    }
+  }, [roomId, httpBaseUrl, password]);
+
+  const onRenameSelf = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    const next = window.prompt(t("presence.rename"), name || displayName);
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    setName(trimmed);
+  };
+
   const hasFrontmatter = getFrontmatterPrefixLength(markdown) != null;
+
+  const showJoinUi = joinGate === "password" || joinGate === "missing" || joinGate === "error";
+  const showChecking = joinGate === "checking";
 
   return (
     <main className="page">
       <header className="topbar">
         <div className="topbar-brand">
-          <h1>Markpad</h1>
-          <span className="topbar-sub">Invité · CodeMirror 6</span>
+          <h1>{t("brand.title")}</h1>
+          <span className="topbar-sub">{t("brand.subtitle")}</span>
         </div>
         <div className="topbar-actions">
-          {started ? (
-            <div className="presence" aria-label="Personnes connectées">
-              {presence.map((user) => (
-                <span key={user.id} className="user" style={{ borderColor: user.color }}>
-                  <i style={{ backgroundColor: user.color }} /> {user.name}
-                </span>
+          <label className="lang-select" title={t("language.label")}>
+            <Languages size={14} strokeWidth={2} aria-hidden />
+            <select
+              value={i18n.language.startsWith("de") ? "de" : i18n.language.slice(0, 2)}
+              onChange={(e) => setLocale(e.target.value as SupportedLocale)}
+              aria-label={t("language.label")}
+            >
+              {SUPPORTED_LOCALES.map((lng) => (
+                <option key={lng} value={lng}>
+                  {lng.toUpperCase()}
+                </option>
               ))}
-            </div>
+            </select>
+          </label>
+          {started ? (
+            <>
+              <button
+                type="button"
+                className="user user--local"
+                title={t("presence.rename")}
+                onContextMenu={onRenameSelf}
+                aria-label={`${t("presence.you")}: ${displayName}`}
+              >
+                <i style={{ backgroundColor: "#0ea5e9" }} />
+                {t("presence.you")}: {displayName}
+              </button>
+              <div className="presence" aria-label={t("presence.label")}>
+                {presence.map((user) => (
+                  <span key={user.id} className="user" style={{ borderColor: user.color }}>
+                    <i style={{ backgroundColor: user.color }} /> {user.name}
+                  </span>
+                ))}
+              </div>
+            </>
           ) : null}
           <span className={`badge ${status}`}>
             {status === "connected" ? (
               <>
                 <Wifi size={14} strokeWidth={2} aria-hidden />
-                Connecté
+                {t("connection.connected")}
               </>
             ) : (
               <>
                 <WifiOff size={14} strokeWidth={2} aria-hidden />
-                Hors-ligne
+                {t("connection.offline")}
               </>
             )}
           </span>
         </div>
       </header>
 
-      {!started ? (
+      {showChecking ? (
+        <section className="join join--status">
+          <p>{t("join.checking")}</p>
+        </section>
+      ) : null}
+
+      {showJoinUi ? (
         <section className="join">
-          <h2>Rejoindre la room</h2>
+          <h2>{t("join.title")}</h2>
+          {joinGate === "missing" ? <p className="join-error">{t("join.notFound")}</p> : null}
+          {joinGate === "error" ? <p className="join-error">{t("join.notFound")}</p> : null}
+          {joinGate === "password" ? <p>{t("join.passwordRequired")}</p> : null}
           <label>
-            Votre nom
+            {t("join.yourName")}
             <input
               autoComplete="off"
               name="markpad_display_name"
@@ -208,7 +460,8 @@ export const App = () => {
             />
           </label>
           <label>
-            Mot de passe room (optionnel)
+            {t("join.roomPassword")}
+            <span className="join-hint">{t("join.roomPasswordOptional")}</span>
             <input
               type="password"
               autoComplete="new-password"
@@ -217,19 +470,21 @@ export const App = () => {
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
-          <button onClick={() => setStarted(true)}>Se connecter</button>
+          <button type="button" onClick={() => void tryJoinWithPassword()}>
+            {t("join.connect")}
+          </button>
         </section>
       ) : null}
 
       {started ? (
         <div className="toolbar-stack">
-          <nav className="obsidian-toolbar" aria-label="Mode d’affichage">
+          <nav className="obsidian-toolbar" aria-label={t("toolbar.viewMode")}>
             <div className="obsidian-toolbar__group">
               <button
                 type="button"
                 className={iconBtnClass(viewMode === "edit")}
-                title="Éditer (source)"
-                aria-label="Éditer (source)"
+                title={t("toolbar.editSource")}
+                aria-label={t("toolbar.editSource")}
                 aria-pressed={viewMode === "edit"}
                 onClick={() => setViewMode("edit")}
               >
@@ -238,8 +493,8 @@ export const App = () => {
               <button
                 type="button"
                 className={iconBtnClass(viewMode === "preview")}
-                title="Lecture (aperçu)"
-                aria-label="Lecture (aperçu)"
+                title={t("toolbar.preview")}
+                aria-label={t("toolbar.preview")}
                 aria-pressed={viewMode === "preview"}
                 onClick={() => setViewMode("preview")}
               >
@@ -248,8 +503,8 @@ export const App = () => {
               <button
                 type="button"
                 className={iconBtnClass(viewMode === "split")}
-                title="Scinder édition / aperçu"
-                aria-label="Scinder édition et aperçu"
+                title={t("toolbar.split")}
+                aria-label={t("toolbar.split")}
                 aria-pressed={viewMode === "split"}
                 onClick={() => setViewMode("split")}
               >
@@ -258,11 +513,23 @@ export const App = () => {
             </div>
             <div className="obsidian-toolbar__sep" aria-hidden />
             <div className="obsidian-toolbar__group">
+              {folderMode && folderPaths.length > 0 ? (
+                <button
+                  type="button"
+                  className={iconBtnClass(treeOpen)}
+                  title={t("toolbar.fileTree")}
+                  aria-label={t("toolbar.fileTree")}
+                  aria-pressed={treeOpen}
+                  onClick={() => setTreeOpen((v) => !v)}
+                >
+                  <FolderTree size={18} strokeWidth={2} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={iconBtnClass(tocOpen)}
-                title="Plan du document"
-                aria-label="Afficher ou masquer le plan"
+                title={t("toolbar.toc")}
+                aria-label={t("toolbar.toc")}
                 aria-pressed={tocOpen}
                 onClick={() => setTocOpen((v) => !v)}
               >
@@ -271,8 +538,10 @@ export const App = () => {
               <button
                 type="button"
                 className="obsidian-tool"
-                title={theme === "dark" ? "Thème clair" : "Thème sombre"}
-                aria-label={theme === "dark" ? "Passer au thème clair" : "Passer au thème sombre"}
+                title={theme === "dark" ? t("toolbar.themeLight") : t("toolbar.themeDark")}
+                aria-label={
+                  theme === "dark" ? t("toolbar.themeLight") : t("toolbar.themeDark")
+                }
                 onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
               >
                 {theme === "dark" ? (
@@ -285,13 +554,13 @@ export const App = () => {
           </nav>
 
           {showEditor ? (
-            <nav className="obsidian-toolbar" aria-label="Édition Markdown">
+            <nav className="obsidian-toolbar" aria-label={t("toolbar.markdown")}>
               <div className="obsidian-toolbar__group">
                 <button
                   type="button"
                   className={iconBtnClass(hideFrontmatter)}
-                  title="Masquer le frontmatter (éditeur et aperçu)"
-                  aria-label="Masquer le frontmatter YAML"
+                  title={t("toolbar.hideFrontmatter")}
+                  aria-label={t("toolbar.hideFrontmatter")}
                   aria-pressed={hideFrontmatter}
                   disabled={!hasFrontmatter}
                   onClick={() => setHideFrontmatter((v) => !v)}
@@ -301,8 +570,8 @@ export const App = () => {
                 <button
                   type="button"
                   className={iconBtnClass(showLineNumbers)}
-                  title="Numéros de ligne"
-                  aria-label="Afficher ou masquer les numéros de ligne"
+                  title={t("toolbar.lineNumbers")}
+                  aria-label={t("toolbar.lineNumbers")}
                   aria-pressed={showLineNumbers}
                   onClick={() => setShowLineNumbers((v) => !v)}
                 >
@@ -314,8 +583,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Gras"
-                  aria-label="Gras"
+                  title={t("toolbar.bold")}
+                  aria-label={t("toolbar.bold")}
                   onClick={() => runtime?.formatBold()}
                 >
                   <Bold size={18} strokeWidth={2} />
@@ -323,8 +592,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Italique"
-                  aria-label="Italique"
+                  title={t("toolbar.italic")}
+                  aria-label={t("toolbar.italic")}
                   onClick={() => runtime?.formatItalic()}
                 >
                   <Italic size={18} strokeWidth={2} />
@@ -332,8 +601,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Titre 1"
-                  aria-label="Titre niveau 1"
+                  title={t("toolbar.heading1")}
+                  aria-label={t("toolbar.heading1")}
                   onClick={() => runtime?.formatHeading1()}
                 >
                   <Heading1 size={18} strokeWidth={2} />
@@ -341,8 +610,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Titre 2"
-                  aria-label="Titre niveau 2"
+                  title={t("toolbar.heading2")}
+                  aria-label={t("toolbar.heading2")}
                   onClick={() => runtime?.formatHeading2()}
                 >
                   <Heading2 size={18} strokeWidth={2} />
@@ -350,8 +619,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Titre 3"
-                  aria-label="Titre niveau 3"
+                  title={t("toolbar.heading3")}
+                  aria-label={t("toolbar.heading3")}
                   onClick={() => runtime?.formatHeading3()}
                 >
                   <Heading3 size={18} strokeWidth={2} />
@@ -362,8 +631,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Liste à puces"
-                  aria-label="Liste à puces"
+                  title={t("toolbar.bulletList")}
+                  aria-label={t("toolbar.bulletList")}
                   onClick={() => runtime?.formatBullet()}
                 >
                   <List size={18} strokeWidth={2} />
@@ -371,8 +640,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Liste numérotée"
-                  aria-label="Liste numérotée"
+                  title={t("toolbar.orderedList")}
+                  aria-label={t("toolbar.orderedList")}
                   onClick={() => runtime?.formatOrdered()}
                 >
                   <ListOrdered size={18} strokeWidth={2} />
@@ -380,8 +649,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Citation"
-                  aria-label="Citation"
+                  title={t("toolbar.quote")}
+                  aria-label={t("toolbar.quote")}
                   onClick={() => runtime?.formatQuote()}
                 >
                   <TextQuote size={18} strokeWidth={2} />
@@ -389,8 +658,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Code inline"
-                  aria-label="Code inline"
+                  title={t("toolbar.inlineCode")}
+                  aria-label={t("toolbar.inlineCode")}
                   onClick={() => runtime?.formatCode()}
                 >
                   <Code size={18} strokeWidth={2} />
@@ -398,8 +667,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Lien"
-                  aria-label="Insérer un lien"
+                  title={t("toolbar.link")}
+                  aria-label={t("toolbar.link")}
                   onClick={() => runtime?.formatLink()}
                 >
                   <Link size={18} strokeWidth={2} />
@@ -407,8 +676,8 @@ export const App = () => {
                 <button
                   type="button"
                   className="obsidian-tool"
-                  title="Ligne horizontale"
-                  aria-label="Ligne horizontale"
+                  title={t("toolbar.horizontalRule")}
+                  aria-label={t("toolbar.horizontalRule")}
                   onClick={() => runtime?.formatHr()}
                 >
                   <Minus size={18} strokeWidth={2} />
@@ -419,43 +688,119 @@ export const App = () => {
         </div>
       ) : null}
 
-      <section
-        className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}`}
-      >
-        <section
-          className={`editor-shell ${showEditor && showPreview ? "editor-shell--split" : ""}`}
+      {started ? (
+        <Group
+          orientation="horizontal"
+          id="markpad-outer"
+          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${folderMode ? " workspace--folder" : ""}${folderMode && !treeOpen ? " workspace--no-tree" : ""}`}
         >
-          <div
-            ref={mountRef}
-            className="editor"
-            style={{ display: showEditor ? "block" : "none" }}
-          />
-          <article
-            className="preview markdown-body"
-            style={{ display: showPreview ? "block" : "none" }}
-            dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
-          />
-        </section>
-        {tocOpen ? (
-          <aside className="toc-panel">
-            <h3>Plan</h3>
-            {toc.length === 0 ? <p>Aucun titre.</p> : null}
-            {toc.map((item) => (
-              <button
-                key={item.id}
-                className="toc-item"
-                style={{ paddingLeft: `${item.level * 10}px` }}
-                onClick={() => {
-                  setViewMode((m) => (m === "edit" ? "split" : m));
-                  setTimeout(() => goToHeading(item.id), 20);
-                }}
+          {folderMode && treeOpen && folderPaths.length > 0 ? (
+            <>
+              <Panel
+                id="tree"
+                defaultSize="22%"
+                minSize="8%"
+                maxSize="92%"
+                className="workspace-panel"
               >
-                {item.text}
-              </button>
-            ))}
-          </aside>
-        ) : null}
-      </section>
+                <FileTreePanel
+                  title={t("folder.treeTitle")}
+                  paths={folderPaths}
+                  activePath={activeFilePath}
+                  onSelect={(p) => setActiveFilePath(p)}
+                />
+              </Panel>
+              <Separator className="resize-handle" />
+            </>
+          ) : null}
+
+          <Panel
+            id="main"
+            defaultSize={
+              folderMode && treeOpen && folderPaths.length > 0 ? "50%" : "72%"
+            }
+            minSize="12%"
+            maxSize="96%"
+          >
+            <section
+              className={`editor-shell ${showEditor && showPreview ? "editor-shell--fill" : ""}${!showEditor && showPreview ? " editor-shell--preview-only" : ""}`}
+            >
+              {showEditor ? (
+                <Group orientation="horizontal" id="markpad-editor-layout">
+                  <Panel
+                    id="editor"
+                    defaultSize={showPreview ? "50%" : "100%"}
+                    minSize={showPreview ? "22%" : "12%"}
+                  >
+                    <div
+                      ref={mountRef}
+                      className="editor"
+                      style={{ height: "100%", minHeight: 0 }}
+                    />
+                  </Panel>
+                  {showPreview ? (
+                    <>
+                      <Separator className="resize-handle" />
+                      <Panel id="preview" defaultSize="50%" minSize="22%">
+                        <article
+                          className="preview markdown-body"
+                          style={{ height: "100%", minHeight: 0, overflow: "auto" }}
+                          dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
+                        />
+                      </Panel>
+                    </>
+                  ) : null}
+                </Group>
+              ) : null}
+              {!showEditor && showPreview ? (
+                <>
+                  <div
+                    ref={mountRef}
+                    className="editor editor--yjs-mount-only"
+                    aria-hidden
+                  />
+                  <article
+                    className="preview markdown-body editor-shell-preview-article"
+                    dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
+                  />
+                </>
+              ) : null}
+            </section>
+          </Panel>
+
+          {tocOpen ? (
+            <>
+              <Separator className="resize-handle" />
+              <Panel
+                id="toc"
+                defaultSize="28%"
+                minSize="10%"
+                maxSize="92%"
+                className="workspace-panel"
+              >
+                <aside className="toc-panel">
+                  <h3>{t("toc.title")}</h3>
+                  {toc.length === 0 ? <p>{t("toc.empty")}</p> : null}
+                  {toc.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="toc-item"
+                      style={{ paddingLeft: `${item.level * 10}px` }}
+                      onClick={() => {
+                        setViewMode((m) => (m === "edit" ? "split" : m));
+                        setTimeout(() => goToHeading(item.id), 20);
+                      }}
+                    >
+                      {item.text}
+                    </button>
+                  ))}
+                </aside>
+              </Panel>
+            </>
+          ) : null}
+        </Group>
+      ) : null}
     </main>
   );
 };
