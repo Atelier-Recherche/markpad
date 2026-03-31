@@ -45,7 +45,15 @@
     "quote": "Quote",
     "inlineCode": "Inline code",
     "link": "Insert link",
-    "horizontalRule": "Horizontal rule"
+    "horizontalRule": "Horizontal rule",
+    "history": "Modification history"
+  },
+  "history": {
+    "title": "History",
+    "empty": "No snapshots available yet.",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "chars": "{{count}} characters"
   },
   "toc": {
     "title": "Outline",

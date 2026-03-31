@@ -52,6 +52,10 @@ import {
   MARKPAD_SHARES_VIEW_TYPE,
   type SharePanelRow
 } from "./sharesView";
+import {
+  MarkpadHistoryView,
+  MARKPAD_HISTORY_VIEW_TYPE
+} from "./historyView";
 
 type ActiveRuntime = {
   mode: "note" | "folder";
@@ -281,6 +285,7 @@ export default class MarkpadPlugin extends Plugin {
     setMarkpadCollabDebug(this.settings.debugCollab);
     this.addSettingTab(new MarkpadSettingTab(this.app, this));
     this.registerView(MARKPAD_SHARES_VIEW_TYPE, (leaf) => new MarkpadSharesView(leaf, this));
+    this.registerView(MARKPAD_HISTORY_VIEW_TYPE, (leaf) => new MarkpadHistoryView(leaf, this));
     this.statusBarEl = this.addStatusBarItem();
     this.updateStatusBar("off");
 
@@ -319,6 +324,11 @@ export default class MarkpadPlugin extends Plugin {
       id: "markpad-open-shares-panel",
       name: t(L, "cmdSharesPanel"),
       callback: () => void this.openSharesPanel()
+    });
+    this.addCommand({
+      id: "markpad-open-history-panel",
+      name: L === "en" ? "Open history panel" : "Ouvrir le panneau historique",
+      callback: () => void this.openHistoryPanel()
     });
 
     this.registerEvent(
@@ -2596,6 +2606,28 @@ export default class MarkpadPlugin extends Plugin {
     const leaf =
       this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: MARKPAD_SHARES_VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  public getActiveSharedRoom(): { roomId: string; filePath: string | null; kind: "note" | "folder" } | null {
+    if (!this.activeRuntime) return null;
+    return {
+      roomId: this.activeRuntime.roomId,
+      filePath: this.activeRuntime.mode === "folder" ? (this.activeRuntime.filePath ?? null) : null,
+      kind: this.activeRuntime.mode
+    };
+  }
+
+  public async openHistoryPanel(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(MARKPAD_HISTORY_VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]!);
+      void (existing[0]!.view as MarkpadHistoryView).refresh();
+      return;
+    }
+    const leaf =
+      this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: MARKPAD_HISTORY_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
 

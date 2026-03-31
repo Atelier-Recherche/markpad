@@ -3,7 +3,14 @@ import type Database from "better-sqlite3";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { config } from "../config.js";
 import { verifyJwt } from "./auth.js";
-import { countSharesByOwner, deleteShareRow, insertShareRow } from "../db/sqlite.js";
+import {
+  countSharesByOwner,
+  deleteShareRow,
+  deleteSnapshotsByRoom,
+  getSnapshotContent,
+  insertShareRow,
+  listSnapshotsMeta
+} from "../db/sqlite.js";
 import { RedisDocStore } from "../persistence/redisDocStore.js";
 import type { SessionStore } from "../sessionStore.js";
 
@@ -139,7 +146,40 @@ export const registerSessionsApi = (
     await sessions.deleteSession(roomId);
     await docs.delete(roomId);
     deleteShareRow(db, roomId);
+    deleteSnapshotsByRoom(db, roomId);
     res.status(204).send();
+  });
+
+  app.get("/sessions/:roomId/history", async (req, res) => {
+    const roomId = req.params.roomId;
+    const session = await sessions.getSession(roomId);
+    if (!session) {
+      res.status(404).json({ error: "session_not_found" });
+      return;
+    }
+    const filePath = typeof req.query.filePath === "string" ? req.query.filePath : undefined;
+    const snapshots = listSnapshotsMeta(db, roomId, filePath);
+    res.json({ snapshots });
+  });
+
+  app.get("/sessions/:roomId/history/:snapshotId", async (req, res) => {
+    const roomId = req.params.roomId;
+    const snapshotId = parseInt(req.params.snapshotId, 10);
+    if (isNaN(snapshotId)) {
+      res.status(400).json({ error: "invalid_snapshot_id" });
+      return;
+    }
+    const session = await sessions.getSession(roomId);
+    if (!session) {
+      res.status(404).json({ error: "session_not_found" });
+      return;
+    }
+    const snapshot = getSnapshotContent(db, snapshotId);
+    if (!snapshot || snapshot.room_id !== roomId) {
+      res.status(404).json({ error: "snapshot_not_found" });
+      return;
+    }
+    res.json(snapshot);
   });
 
   app.post("/sessions/:roomId/validate", async (req, res) => {

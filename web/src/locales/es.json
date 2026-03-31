@@ -45,7 +45,15 @@
     "quote": "Cita",
     "inlineCode": "Código en línea",
     "link": "Insertar enlace",
-    "horizontalRule": "Línea horizontal"
+    "horizontalRule": "Línea horizontal",
+    "history": "Historial de modificaciones"
+  },
+  "history": {
+    "title": "Historial",
+    "empty": "No hay instantáneas disponibles.",
+    "loading": "Cargando…",
+    "refresh": "Actualizar",
+    "chars": "{{count}} caracteres"
   },
   "toc": {
     "title": "Esquema",

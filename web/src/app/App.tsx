@@ -6,6 +6,7 @@ import {
   Bold,
   BookOpen,
   Braces,
+  Clock,
   Code,
   Columns2,
   Heading1,
@@ -32,6 +33,7 @@ import { createCollabEditor, type CollabRuntime } from "../collab/editor";
 import { getFrontmatterPrefixLength } from "../collab/frontmatter";
 import { SUPPORTED_LOCALES, setLocale, type SupportedLocale } from "../i18n/index";
 import { FileTreePanel } from "./FileTreePanel";
+import { HistoryPanel } from "./HistoryPanel";
 
 const DISPLAY_NAME_KEY = "markpad-display-name";
 const UI_ONBOARDING_KEY = "markpad-ui-onboarding";
@@ -95,6 +97,10 @@ export const App = () => {
   const [tocOpen, setTocOpen] = useState(() => {
     if (!hasCompletedUiOnboarding()) return false;
     return localStorage.getItem("markpad-toc-open") !== "false";
+  });
+  const [historyOpen, setHistoryOpen] = useState(() => {
+    if (!hasCompletedUiOnboarding()) return false;
+    return localStorage.getItem("markpad-history-open") === "true";
   });
   const [treeOpen, setTreeOpen] = useState(() => {
     if (!hasCompletedUiOnboarding()) return false;
@@ -201,6 +207,10 @@ export const App = () => {
   useEffect(() => {
     localStorage.setItem("markpad-toc-open", tocOpen ? "true" : "false");
   }, [tocOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("markpad-history-open", historyOpen ? "true" : "false");
+  }, [historyOpen]);
 
   useEffect(() => {
     localStorage.setItem("markpad-tree-open", treeOpen ? "true" : "false");
@@ -547,6 +557,16 @@ export const App = () => {
               </button>
               <button
                 type="button"
+                className={iconBtnClass(historyOpen)}
+                title={t("toolbar.history")}
+                aria-label={t("toolbar.history")}
+                aria-pressed={historyOpen}
+                onClick={() => setHistoryOpen((v) => !v)}
+              >
+                <Clock size={18} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
                 className="obsidian-tool"
                 title={theme === "dark" ? t("toolbar.themeLight") : t("toolbar.themeDark")}
                 aria-label={
@@ -702,7 +722,7 @@ export const App = () => {
         <Group
           orientation="horizontal"
           id="markpad-outer"
-          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${folderMode ? " workspace--folder" : ""}${folderMode && !treeOpen ? " workspace--no-tree" : ""}`}
+          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${historyOpen ? "" : " workspace--no-history"}${folderMode ? " workspace--folder" : ""}${folderMode && !treeOpen ? " workspace--no-tree" : ""}`}
         >
           {folderMode && treeOpen && folderPaths.length > 0 ? (
             <>
@@ -807,6 +827,26 @@ export const App = () => {
                     </button>
                   ))}
                 </aside>
+              </Panel>
+            </>
+          ) : null}
+
+          {historyOpen ? (
+            <>
+              <Separator className="resize-handle" />
+              <Panel
+                id="history"
+                defaultSize="28%"
+                minSize="12%"
+                maxSize="92%"
+                className="workspace-panel"
+              >
+                <HistoryPanel
+                  roomId={roomId}
+                  httpBaseUrl={httpBaseUrl}
+                  folderMode={folderMode}
+                  activeFilePath={activeFilePath}
+                />
               </Panel>
             </>
           ) : null}

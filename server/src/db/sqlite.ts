@@ -37,6 +37,14 @@ export function initDb(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS document_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id TEXT NOT NULL,
+      file_path TEXT,
+      content TEXT NOT NULL,
+      snapshot_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_history_room ON document_history(room_id, file_path, snapshot_at);
   `);
   return db;
 }
@@ -117,6 +125,88 @@ export function listSharesByOwner(db: Database.Database, ownerKey: string) {
     file_paths_json: string | null;
     created_at: string;
   }>;
+}
+
+const MAX_SNAPSHOTS_PER_FILE = 100;
+
+export function insertSnapshot(
+  db: Database.Database,
+  row: { roomId: string; filePath: string | null; content: string }
+): void {
+  db.prepare(
+    `INSERT INTO document_history (room_id, file_path, content, snapshot_at)
+     VALUES (@roomId, @filePath, @content, @snapshotAt)`
+  ).run({
+    roomId: row.roomId,
+    filePath: row.filePath ?? null,
+    content: row.content,
+    snapshotAt: new Date().toISOString()
+  });
+}
+
+export function pruneOldSnapshots(
+  db: Database.Database,
+  roomId: string,
+  filePath: string | null
+): void {
+  db.prepare(
+    `DELETE FROM document_history
+     WHERE room_id = ? AND (file_path IS ? OR file_path = ?)
+       AND id NOT IN (
+         SELECT id FROM document_history
+         WHERE room_id = ? AND (file_path IS ? OR file_path = ?)
+         ORDER BY snapshot_at DESC
+         LIMIT ${MAX_SNAPSHOTS_PER_FILE}
+       )`
+  ).run(roomId, filePath, filePath, roomId, filePath, filePath);
+}
+
+export type SnapshotMeta = {
+  id: number;
+  room_id: string;
+  file_path: string | null;
+  content_length: number;
+  snapshot_at: string;
+};
+
+export function listSnapshotsMeta(
+  db: Database.Database,
+  roomId: string,
+  filePath?: string | null
+): SnapshotMeta[] {
+  if (filePath !== undefined) {
+    return db
+      .prepare(
+        `SELECT id, room_id, file_path, LENGTH(content) AS content_length, snapshot_at
+         FROM document_history
+         WHERE room_id = ? AND (file_path IS ? OR file_path = ?)
+         ORDER BY snapshot_at DESC`
+      )
+      .all(roomId, filePath, filePath) as SnapshotMeta[];
+  }
+  return db
+    .prepare(
+      `SELECT id, room_id, file_path, LENGTH(content) AS content_length, snapshot_at
+       FROM document_history
+       WHERE room_id = ?
+       ORDER BY snapshot_at DESC`
+    )
+    .all(roomId) as SnapshotMeta[];
+}
+
+export function getSnapshotContent(
+  db: Database.Database,
+  snapshotId: number
+): { id: number; room_id: string; file_path: string | null; content: string; snapshot_at: string } | undefined {
+  return db
+    .prepare(`SELECT id, room_id, file_path, content, snapshot_at FROM document_history WHERE id = ?`)
+    .get(snapshotId) as
+    | { id: number; room_id: string; file_path: string | null; content: string; snapshot_at: string }
+    | undefined;
+}
+
+export function deleteSnapshotsByRoom(db: Database.Database, roomId: string): void {
+  db.prepare(`DELETE FROM document_history WHERE room_id = ?`).run(roomId);
 }
 
 export function listAllShares(db: Database.Database) {

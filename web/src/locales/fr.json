@@ -45,7 +45,15 @@
     "quote": "Citation",
     "inlineCode": "Code inline",
     "link": "Insérer un lien",
-    "horizontalRule": "Ligne horizontale"
+    "horizontalRule": "Ligne horizontale",
+    "history": "Historique des modifications"
+  },
+  "history": {
+    "title": "Historique",
+    "empty": "Aucun snapshot disponible.",
+    "loading": "Chargement…",
+    "refresh": "Rafraîchir",
+    "chars": "{{count}} caractères"
   },
   "toc": {
     "title": "Plan",

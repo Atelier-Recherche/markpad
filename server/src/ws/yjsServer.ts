@@ -5,10 +5,13 @@ import * as encoding from "lib0/encoding";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import type { WebSocket, WebSocketServer } from "ws";
+import type Database from "better-sqlite3";
 import { RedisDocStore } from "../persistence/redisDocStore.js";
 import { SessionStore } from "../sessionStore.js";
+import { insertSnapshot, pruneOldSnapshots } from "../db/sqlite.js";
 
 const TOUCH_THROTTLE_MS = 60_000;
+const SNAPSHOT_DEBOUNCE_MS = 30_000;
 
 type RoomRuntime = {
   doc: Y.Doc;
@@ -16,6 +19,8 @@ type RoomRuntime = {
   clients: Set<WebSocket>;
   awarenessClientsBySocket: Map<WebSocket, Set<number>>;
   loaded: boolean;
+  kind: "note" | "folder";
+  snapshotTimers: Map<string, ReturnType<typeof setTimeout>>;
 };
 type AwarenessUpdatePayload = {
   added: number[];
@@ -35,7 +40,8 @@ export class MarkpadYjsServer {
   public constructor(
     private readonly wss: WebSocketServer,
     private readonly docs: RedisDocStore,
-    private readonly sessions: SessionStore
+    private readonly sessions: SessionStore,
+    private readonly db: Database.Database
   ) {}
 
   public start(): void {
@@ -88,7 +94,9 @@ export class MarkpadYjsServer {
         awareness: new awarenessProtocol.Awareness(doc),
         clients: new Set(),
         awarenessClientsBySocket: new Map(),
-        loaded: false
+        loaded: false,
+        kind: session.kind ?? "note",
+        snapshotTimers: new Map()
       };
       const createdRoom = runtime;
       createdRoom.awareness.on("update", ({ added, updated, removed }: AwarenessUpdatePayload, origin: unknown) => {
@@ -117,6 +125,7 @@ export class MarkpadYjsServer {
           encoding.toUint8Array(encoder),
           origin instanceof Object ? (origin as WebSocket) : undefined
         );
+        this.scheduleSnapshot(roomId, createdRoom);
       });
 
       this.rooms.set(roomId, createdRoom);
@@ -211,6 +220,52 @@ export class MarkpadYjsServer {
     encoding.writeVarUint(awarenessQuery, MESSAGE_QUERY_AWARENESS);
     ws.send(encoding.toUint8Array(awarenessQuery));
 
+  }
+
+  private scheduleSnapshot(roomId: string, room: RoomRuntime): void {
+    if (room.kind === "folder") {
+      const files = room.doc.getMap("files");
+      for (const filePath of files.keys()) {
+        const existing = room.snapshotTimers.get(filePath);
+        if (existing) clearTimeout(existing);
+        room.snapshotTimers.set(
+          filePath,
+          setTimeout(() => {
+            room.snapshotTimers.delete(filePath);
+            this.takeSnapshot(roomId, room, filePath);
+          }, SNAPSHOT_DEBOUNCE_MS)
+        );
+      }
+    } else {
+      const key = "__note__";
+      const existing = room.snapshotTimers.get(key);
+      if (existing) clearTimeout(existing);
+      room.snapshotTimers.set(
+        key,
+        setTimeout(() => {
+          room.snapshotTimers.delete(key);
+          this.takeSnapshot(roomId, room, null);
+        }, SNAPSHOT_DEBOUNCE_MS)
+      );
+    }
+  }
+
+  private takeSnapshot(roomId: string, room: RoomRuntime, filePath: string | null): void {
+    try {
+      let content: string;
+      if (filePath !== null) {
+        const files = room.doc.getMap("files");
+        const yText = files.get(filePath) as Y.Text | undefined;
+        content = yText ? yText.toString() : "";
+      } else {
+        content = room.doc.getText("content").toString();
+      }
+      if (!content.trim()) return;
+      insertSnapshot(this.db, { roomId, filePath, content });
+      pruneOldSnapshots(this.db, roomId, filePath);
+    } catch (err) {
+      console.error(`Markpad: snapshot failed for room ${roomId}`, err);
+    }
   }
 
   private broadcastBinary(

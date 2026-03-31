@@ -68,7 +68,7 @@ registerAdminApi(app, db, sessionStore, docStore);
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-new MarkpadYjsServer(wss, docStore, sessionStore).start();
+new MarkpadYjsServer(wss, docStore, sessionStore, db).start();
 
 server.listen(config.port, config.host, () => {
   console.log(`Markpad server listening on ${config.host}:${config.port}`);

@@ -45,7 +45,15 @@
     "quote": "Zitat",
     "inlineCode": "Inline-Code",
     "link": "Link einfügen",
-    "horizontalRule": "Horizontale Linie"
+    "horizontalRule": "Horizontale Linie",
+    "history": "Änderungsverlauf"
+  },
+  "history": {
+    "title": "Verlauf",
+    "empty": "Keine Snapshots verfügbar.",
+    "loading": "Laden…",
+    "refresh": "Aktualisieren",
+    "chars": "{{count}} Zeichen"
   },
   "toc": {
     "title": "Gliederung",
