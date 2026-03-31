@@ -9,6 +9,7 @@ import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbou
 import { extractPresence } from "./presence";
 import { getFrontmatterPrefixLength } from "./frontmatter";
 import * as mdFmt from "./markdownFormat";
+import { createLivePreviewExtension } from "./livePreview/index";
 
 export interface CollabRuntime {
   doc: Y.Doc;
@@ -253,6 +254,7 @@ export const createCollabEditor = (input: {
           markdown(),
           markpadCmTheme,
           frontmatterHiddenField,
+          createLivePreviewExtension(),
           placeholder("Markdown collaboratif…"),
           yCollabExt,
           EditorView.updateListener.of((u) => {
