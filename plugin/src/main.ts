@@ -4,6 +4,7 @@ import {
   Modal,
   Notice,
   normalizePath,
+  parseYaml,
   setIcon,
   TAbstractFile,
   Plugin,
@@ -507,16 +508,29 @@ export default class MarkpadPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.ensureFileExplorerDecorationObserver();
       // Reconstruire la map après que le metadataCache soit prêt.
-      // L'appel préalable (ligne ~437) peut avoir trouvé un cache vide si Obsidian
-      // n'avait pas encore indexé les fichiers.
+      // rebuildSharedNotesFromFrontmatter gère les notes ; rebuildFolderSharesFromFiles
+      // gère les dossiers (lecture directe car metadataCache n'indexe pas les fichiers '.*').
+      // queueAutoConnect est lancé seulement après les deux pour éviter un auto-connect
+      // avant que folderSharesMeta soit peuplé.
       this.rebuildSharedNotesFromFrontmatter();
-      this.queueAutoConnect();
+      void this.rebuildFolderSharesFromFiles().then(() => {
+        this.queueAutoConnect();
+      });
     });
     // Mettre à jour sharedNotes quand le cache d'un fichier est (re)calculé.
     // Couvre le cas où le cache arrive après onLayoutReady.
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
         this.syncShareFromFileFrontmatter(file);
+      })
+    );
+    // Déclencher l'auto-connect une fois que le metadataCache a fini d'indexer tous les fichiers.
+    // Nécessaire pour le démarrage Obsidian à froid : onLayoutReady peut tirer avant que le cache
+    // ne soit prêt, laissant sharedNotes vide ; "resolved" garantit que tout est indexé.
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        this.refreshSharesPanel();
+        this.queueAutoConnect();
       })
     );
     this.registerEvent(
@@ -1862,8 +1876,86 @@ export default class MarkpadPlugin extends Plugin {
   private rebuildSharedNotesFromFrontmatter(): void {
     this.sharedNotes.clear();
     for (const file of this.app.vault.getMarkdownFiles()) {
+      // Les fichiers ancres (commençant par '.') sont traités par rebuildFolderSharesFromFiles
+      // qui utilise un accès direct au disque pour contourner le cache non indexé.
+      if (file.name === FOLDER_SHARE_FILENAME) continue;
       this.syncShareFromFileFrontmatter(file);
     }
+  }
+
+  /**
+   * Reconstruit folderSharesMeta depuis le vault en lisant directement les fichiers ancres.
+   * Les fichiers dont le nom commence par '.' ne sont pas indexés par le metadataCache d'Obsidian,
+   * donc on ne peut pas compter sur getFileCache(). On lit le fichier et on parse le YAML manuellement.
+   */
+  /**
+   * Reconstruit folderSharesMeta en scannant le système de fichiers via vault.adapter.list().
+   * vault.getFiles() peut exclure les fichiers dont le nom commence par '.' ;
+   * l'adapter contourne cette restriction en lisant directement le disque.
+   */
+  private async rebuildFolderSharesFromFiles(): Promise<void> {
+    this.folderSharesMeta.clear();
+
+    // Collecte récursive des chemins d'ancres via le filesystem réel.
+    const anchorPaths: string[] = [];
+    const scanDir = async (dir: string): Promise<void> => {
+      try {
+        const listed = await this.app.vault.adapter.list(dir);
+        for (const fp of listed.files) {
+          const name = fp.includes("/") ? fp.slice(fp.lastIndexOf("/") + 1) : fp;
+          if (name === FOLDER_SHARE_FILENAME) anchorPaths.push(fp);
+        }
+        for (const fd of listed.folders) {
+          const name = fd.includes("/") ? fd.slice(fd.lastIndexOf("/") + 1) : fd;
+          if (name === ".obsidian") continue; // jamais d'ancre dans .obsidian
+          await scanDir(fd);
+        }
+      } catch { /* répertoire inaccessible ou non listé */ }
+    };
+    await scanDir("");
+
+    for (const anchorPath of anchorPaths) {
+      try {
+        let raw: { roomId?: string; shareUrl?: string; filePaths?: string[] } | undefined;
+
+        // Essai via le cache (fonctionne si Obsidian indexe ce fichier).
+        const tfile = this.app.vault.getAbstractFileByPath(anchorPath);
+        if (tfile instanceof TFile) {
+          raw = this.app.metadataCache.getFileCache(tfile)?.frontmatter?.[FOLDER_SHARE_FM] as typeof raw;
+        }
+
+        // Lecture directe via adapter (contourne l'absence d'indexation des fichiers '.*').
+        if (!raw) {
+          const content = await this.app.vault.adapter.read(anchorPath);
+          const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+          if (fmMatch) {
+            const parsed = parseYaml(fmMatch[1]) as Record<string, unknown> | null;
+            raw = parsed?.[FOLDER_SHARE_FM] as typeof raw;
+          }
+        }
+
+        if (!raw?.roomId || !raw?.shareUrl || !Array.isArray(raw.filePaths)) continue;
+
+        const lastSlash = anchorPath.lastIndexOf("/");
+        const root = lastSlash > 0 ? anchorPath.slice(0, lastSlash) : "";
+        const meta: FolderShareMeta = {
+          roomId: raw.roomId,
+          shareUrl: raw.shareUrl,
+          paths: raw.filePaths,
+          anchorPath
+        };
+        this.folderSharesMeta.set(root, meta);
+        for (const p of raw.filePaths) {
+          this.sharedNotes.set(p, { roomId: raw.roomId, shareUrl: raw.shareUrl });
+        }
+      } catch { continue; }
+    }
+    markpadCollabDebug("rebuildFolderSharesFromFiles", {
+      scanned: anchorPaths.length,
+      folderCount: this.folderSharesMeta.size,
+      totalPaths: [...this.folderSharesMeta.values()].flatMap((m) => m.paths).length
+    });
+    this.refreshSharesPanel();
   }
 
   private syncShareFromFileFrontmatter(file: TFile): void {
@@ -1879,7 +1971,10 @@ export default class MarkpadPlugin extends Plugin {
       this.sharedNotes.set(file.path, { roomId: raw.roomId, shareUrl: raw.shareUrl });
       return;
     }
-    this.sharedNotes.delete(file.path);
+    // Ne pas effacer les fichiers membres d'un partage dossier : leur entrée dans sharedNotes
+    // est gérée par syncFolderAnchorFromFile, pas par le frontmatter markpadShare du fichier lui-même.
+    const isInFolder = [...this.folderSharesMeta.values()].some((m) => m.paths.includes(file.path));
+    if (!isInFolder) this.sharedNotes.delete(file.path);
   }
 
   private syncFolderAnchorFromFile(file: TFile): void {
