@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, PluginSettingTab, Setting } from "obsidian";
 import type MarkpadPlugin from "./main";
 
 import { t, type LocaleId } from "./locale";
@@ -153,17 +153,46 @@ export class MarkpadSettingTab extends PluginSettingTab {
       )
       .addButton((btn) =>
         btn.setButtonText("Purger…").onClick(() => {
-          void (async () => {
-            if (
-              !window.confirm(
-                "Supprimer les ancres .markpad-folder-share.md et réinitialiser les partages dossier ?"
-              )
-            ) {
-              return;
-            }
-            await this.plugin.purgeFolderShareAnchors();
-          })();
+          new MarkpadConfirmModal(
+            this.app,
+            "Supprimer les ancres .markpad-folder-share.md et réinitialiser les partages dossier ?",
+            () => { void this.plugin.purgeFolderShareAnchors(); }
+          ).open();
         })
       );
+  }
+}
+
+/**
+ * Modal de confirmation compatible Android.
+ * Remplace window.confirm() qui est bloqué dans les WebViews Android depuis API 17+.
+ */
+class MarkpadConfirmModal extends Modal {
+  public constructor(
+    app: App,
+    private readonly message: string,
+    private readonly onConfirm: () => void
+  ) {
+    super(app);
+  }
+
+  public onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl("p", { text: this.message });
+    const row = contentEl.createDiv({ cls: "modal-button-container" });
+    row.createEl("button", { text: "Annuler" })
+      .addEventListener("click", () => this.close());
+    const confirmBtn = row.createEl("button", {
+      text: "Confirmer",
+      cls: "mod-warning"
+    });
+    confirmBtn.addEventListener("click", () => {
+      this.close();
+      this.onConfirm();
+    });
+  }
+
+  public onClose(): void {
+    this.contentEl.empty();
   }
 }

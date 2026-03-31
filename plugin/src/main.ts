@@ -258,6 +258,8 @@ export default class MarkpadPlugin extends Plugin {
   private collabHasEverConnected = false;
   /** Vrai si la note est actuellement en lecture seule (WS perdu). */
   private collabIsReadonly = false;
+  /** Évite de répéter la Notice de patch WebSocket échoué à chaque reconnexion. */
+  private patchFailedNoticeShown = false;
   /** État WS pour l’icône de la session active (connecting / connected / disconnected). */
   private collabWsStatus: "connecting" | "connected" | "disconnected" = "disconnected";
   /** Reconcile post-sync note en cours (affiche une icône « chargement »). */
@@ -533,6 +535,17 @@ export default class MarkpadPlugin extends Plugin {
         this.queueAutoConnect();
       })
     );
+    // Sur Android, le système peut tuer le WebSocket quand l'app passe en arrière-plan.
+    // À la remise en avant-plan, visibilitychange déclenche une reconnexion immédiate.
+    // Sur desktop ce handler est inoffensif (triggered lors d'un alt-tab par ex.).
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        this.queueAutoConnect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    this.register(() => document.removeEventListener("visibilitychange", onVisibilityChange));
+
     this.registerEvent(
       this.app.vault.on("create", (file) => {
         if (!(file instanceof TFile) || !this.isMarkdownFile(file)) return;
@@ -932,6 +945,13 @@ export default class MarkpadPlugin extends Plugin {
         : "patchYWebsocketProviderOutbound ÉCHOUÉ (note) — _updateHandler absent",
       { patchNote }
     );
+    if (!patchNote && !this.patchFailedNoticeShown) {
+      this.patchFailedNoticeShown = true;
+      new Notice(
+        "Markpad: optimisation WebSocket indisponible sur cette version d'Obsidian.\nLa synchronisation peut générer du trafic réseau supplémentaire.",
+        8000
+      );
+    }
 
     provider.awareness.setLocalStateField("user", {
       name: this.settings.displayName,
@@ -1088,8 +1108,7 @@ export default class MarkpadPlugin extends Plugin {
         }
       );
 
-      await navigator.clipboard.writeText(created.shareUrl);
-      new Notice(`Lien copié: ${created.shareUrl}`);
+      await this.writeClipboardSafe(created.shareUrl, `Lien copié: ${created.shareUrl}`);
       this.refreshSharesPanel();
     } catch (error) {
       this.updateStatusBar("error");
@@ -1382,13 +1401,26 @@ export default class MarkpadPlugin extends Plugin {
     }
   }
 
+  /**
+   * Tente de copier `text` dans le presse-papiers.
+   * Sur Android (WebView restrictif), clipboard.writeText peut lever une exception :
+   * dans ce cas on affiche le lien dans une Notice longue pour copie manuelle.
+   */
+  private async writeClipboardSafe(text: string, successMsg: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      new Notice(successMsg);
+    } catch {
+      new Notice(`${successMsg}\n\n${text}`, 10000);
+    }
+  }
+
   private async copyShareLink(): Promise<void> {
     if (!this.activeRuntime) {
       new Notice("Aucune session Markpad active.");
       return;
     }
-    await navigator.clipboard.writeText(this.activeRuntime.shareUrl);
-    new Notice("Lien de partage copié.");
+    await this.writeClipboardSafe(this.activeRuntime.shareUrl, "Lien de partage copié.");
   }
 
   private async copyShareLinkForPath(filePath: string): Promise<void> {
@@ -1397,8 +1429,7 @@ export default class MarkpadPlugin extends Plugin {
       new Notice("Aucun lien de partage pour cette note.");
       return;
     }
-    await navigator.clipboard.writeText(share.shareUrl);
-    new Notice("Lien de partage copié.");
+    await this.writeClipboardSafe(share.shareUrl, "Lien de partage copié.");
   }
 
   private async stopSharingCurrentNote(): Promise<void> {
@@ -2077,8 +2108,7 @@ export default class MarkpadPlugin extends Plugin {
       await this.attachFolderSharedSession(active.file, active.view, meta, {
         seedLocalFiles: true
       });
-      await navigator.clipboard.writeText(created.shareUrl);
-      new Notice(`Dossier partagé — lien copié : ${created.shareUrl}`);
+      await this.writeClipboardSafe(created.shareUrl, `Dossier partagé — lien copié : ${created.shareUrl}`);
       this.refreshSharesPanel();
     } catch (error) {
       this.updateStatusBar("error");
@@ -2218,6 +2248,13 @@ export default class MarkpadPlugin extends Plugin {
         : "folder:patchYWebsocket ÉCHOUÉ — _updateHandler absent (sortie WS cassée ?)",
       { patchFolder, roomId: meta.roomId, seedLocalFiles: options.seedLocalFiles }
     );
+    if (!patchFolder && !this.patchFailedNoticeShown) {
+      this.patchFailedNoticeShown = true;
+      new Notice(
+        "Markpad: optimisation WebSocket indisponible sur cette version d'Obsidian.\nLa synchronisation peut générer du trafic réseau supplémentaire.",
+        8000
+      );
+    }
     provider.awareness.setLocalStateField("user", {
       name: this.settings.displayName,
       color: this.settings.color
@@ -2259,11 +2296,21 @@ export default class MarkpadPlugin extends Plugin {
     });
     if (!provider.synced) {
       await new Promise<void>((resolve) => {
+        // Timeout de sécurité pour les réseaux mobiles instables (4G/Wi-Fi coupé).
+        // Sans lui, la Promise ne se résoudrait jamais si le serveur est injoignable.
+        // On continue sans premier sync ; Y.js se synchronisera dès que la connexion revient.
+        let timeoutId: number;
         const onSync = (synced: boolean) => {
           if (!synced) return;
+          window.clearTimeout(timeoutId);
           provider.off("sync", onSync);
           resolve();
         };
+        timeoutId = window.setTimeout(() => {
+          provider.off("sync", onSync);
+          markpadCollabDebug("folder:sync timeout 15 s — poursuite sans attente initiale");
+          resolve();
+        }, 15000);
         provider.on("sync", onSync);
       });
     }
@@ -2558,8 +2605,7 @@ export default class MarkpadPlugin extends Plugin {
       new Notice("Ce dossier n'a pas de partage Markpad.");
       return;
     }
-    await navigator.clipboard.writeText(meta.shareUrl);
-    new Notice("Lien du dossier copié.");
+    await this.writeClipboardSafe(meta.shareUrl, "Lien du dossier copié.");
   }
 
   private async stopSharingFolderByPath(folderRootPath: string): Promise<void> {
