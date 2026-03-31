@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { config } from "../config.js";
 import { verifyJwt } from "./auth.js";
-import { deleteShareRow, insertShareRow } from "../db/sqlite.js";
+import { countSharesByOwner, deleteShareRow, insertShareRow } from "../db/sqlite.js";
 import { RedisDocStore } from "../persistence/redisDocStore.js";
 import type { SessionStore } from "../sessionStore.js";
 
@@ -81,6 +81,12 @@ export const registerSessionsApi = (
       return;
     }
 
+    const existingShares = countSharesByOwner(db, body.userId);
+    if (existingShares >= config.maxSharesPerUser) {
+      res.status(429).json({ error: "share_limit_reached" });
+      return;
+    }
+
     const created = await sessions.createSession({
       noteId: body.noteId,
       ownerUserId: body.userId,
@@ -154,6 +160,7 @@ export const registerSessionsApi = (
       roomId,
       noteId: session.noteId,
       kind: session.kind,
+      folderPath: session.folderPath ?? "",
       filePaths: session.filePaths ?? []
     });
   });

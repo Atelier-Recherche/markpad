@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { EditorSelection, EditorState, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, placeholder } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { yCollab } from "y-codemirror.next";
@@ -98,10 +98,26 @@ const frontmatterHiddenField = StateField.define<{
     }
     return {
       hidden,
-      decorations: Decoration.set([Decoration.replace({}).range(0, len)])
+      decorations: Decoration.set([Decoration.replace({ inclusive: false }).range(0, len)])
     };
   },
-  provide: (f) => EditorView.decorations.from(f, (v) => v.decorations)
+  provide: (f) => [
+    EditorView.decorations.from(f, (v) => v.decorations),
+    // Empêcher le curseur d'entrer dans la plage frontmatter lorsqu'elle est masquée.
+    // Decoration.replace cache visuellement mais ne bloque pas la navigation clavier.
+    EditorState.transactionFilter.of((tr) => {
+      const field = tr.startState.field(frontmatterHiddenField);
+      if (!field.hidden) return tr;
+      const len = getFrontmatterPrefixLength(tr.state.doc.toString());
+      if (len == null || len <= 0) return tr;
+      const sel = tr.newSelection;
+      const clamp = (pos: number) => Math.max(pos, len);
+      const anchor = clamp(sel.main.anchor);
+      const head = clamp(sel.main.head);
+      if (anchor === sel.main.anchor && head === sel.main.head) return tr;
+      return [tr, { selection: EditorSelection.single(anchor, head) }];
+    })
+  ]
 });
 
 const resolveYText = (

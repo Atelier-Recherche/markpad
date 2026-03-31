@@ -1,6 +1,15 @@
 import { requestUrl } from "obsidian";
 import type { MarkpadSettings } from "./settings";
 
+const parseSessionErrorBody = (response: { json: unknown }): string | undefined => {
+  try {
+    const j = response.json as { error?: string };
+    return typeof j?.error === "string" ? j.error : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export interface ShareSessionResult {
   roomId: string;
   shareUrl: string;
@@ -34,7 +43,12 @@ export const createShareSession = async (payload: {
   });
 
   if (response.status < 200 || response.status > 299) {
-    throw new Error(`session_create_failed (${response.status})`);
+    const err = parseSessionErrorBody(response);
+    throw new Error(
+      err
+        ? `session_create_failed (${response.status}):${err}`
+        : `session_create_failed (${response.status})`
+    );
   }
 
   const json = response.json as { roomId: string; shareUrl: string };
@@ -72,7 +86,12 @@ export const createFolderShareSession = async (payload: {
   });
 
   if (response.status < 200 || response.status > 299) {
-    throw new Error(`session_create_failed (${response.status})`);
+    const err = parseSessionErrorBody(response);
+    throw new Error(
+      err
+        ? `session_create_failed (${response.status}):${err}`
+        : `session_create_failed (${response.status})`
+    );
   }
 
   const json = response.json as { roomId: string; shareUrl: string };

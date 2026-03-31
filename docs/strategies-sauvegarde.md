@@ -41,6 +41,12 @@ Ce document complète le [README](../README.md) en précisant **où vivent les d
 ## Arrêt d’un partage dossier
 
 - Le fichier **`.markpad-folder-share.md`** peut être supprimé ou nettoyé lors de l’arrêt du partage : les **notes `.md` du dossier restent** dans le vault ; seul le lien serveur et la méta de partage sont retirés côté plugin quand tu « supprimes le partage ».
+- **Supprimer l’ancre ou le dossier** depuis l’explorateur Obsidian est équivalent à un arrêt de partage côté plugin (session terminée côté serveur si possible, état local nettoyé).
+- **Réglages du plugin** : l’action **« Purger… »** supprime en bloc les ancres **`.markpad-folder-share.md`** et réinitialise les métadonnées de partage dossier (voir le README) — utile si des fichiers ancre sont restés orphelins.
+
+## Renommages et déplacements dans le vault
+
+- Pour un **partage dossier**, renommer ou déplacer le dossier partagé (ou des notes à l’intérieur) met à jour les chemins enregistrés et, pendant une session ouverte, les clés Yjs associées, afin de limiter la divergence avec les clients web. **Sauvegarde / versionnement** du vault restent recommandés avant de gros déplacements.
 
 ## En résumé
 

@@ -61,6 +61,8 @@ export const config = {
   rateLimitWindowMs: parseIntOr(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
   rateLimitMax: parseIntOr(process.env.RATE_LIMIT_MAX, 200),
   maxRoomPasswordLength: parseIntOr(process.env.MAX_ROOM_PASSWORD_LENGTH, 128),
+  /** Nombre maximal de sessions de partage actives par utilisateur (index SQLite `share_index`). */
+  maxSharesPerUser: parseIntOr(process.env.MAX_SHARES_PER_USER, 200),
   /** Durée sans activité avant suppression (défaut 365 j). */
   sessionMaxIdleMs: parseIntOr(process.env.SESSION_MAX_IDLE_MS, 365 * 24 * 60 * 60 * 1000),
   sessionCleanupIntervalMs: parseIntOr(process.env.SESSION_CLEANUP_INTERVAL_MS, 60 * 60 * 1000),

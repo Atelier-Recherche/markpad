@@ -101,7 +101,10 @@ export class MarkpadSharesView extends ItemView {
 
       const delBtn = actions.createEl("button", { text: "Supprimer le partage" });
       delBtn.addEventListener("click", () => {
-        void this.plugin.deleteShareFromPanel(row);
+        void (async () => {
+          await this.plugin.deleteShareFromPanel(row);
+          this.refresh();
+        })();
       });
     }
   }

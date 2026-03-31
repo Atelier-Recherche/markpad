@@ -96,6 +96,13 @@ export function deleteShareRow(db: Database.Database, roomId: string): void {
   db.prepare(`DELETE FROM share_index WHERE room_id = ?`).run(roomId);
 }
 
+export function countSharesByOwner(db: Database.Database, ownerKey: string): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM share_index WHERE owner_key = ?`)
+    .get(ownerKey) as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
 export function listSharesByOwner(db: Database.Database, ownerKey: string) {
   return db
     .prepare(

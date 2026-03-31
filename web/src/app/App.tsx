@@ -109,6 +109,7 @@ export const App = () => {
   const [joinGate, setJoinGate] = useState<JoinGate>("checking");
   const [folderMode, setFolderMode] = useState(false);
   const [folderPaths, setFolderPaths] = useState<string[]>([]);
+  const [folderRootPrefix, setFolderRootPrefix] = useState("");
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
 
   const showEditor = viewMode === "edit" || viewMode === "split";
@@ -149,14 +150,17 @@ export const App = () => {
           const data = (await res.json()) as {
             kind?: string;
             filePaths?: string[];
+            folderPath?: string;
           };
           if (data.kind === "folder" && Array.isArray(data.filePaths)) {
             setFolderMode(true);
             setFolderPaths(data.filePaths);
+            setFolderRootPrefix(typeof data.folderPath === "string" ? data.folderPath : "");
             setActiveFilePath(data.filePaths[0] ?? null);
           } else {
             setFolderMode(false);
             setFolderPaths([]);
+            setFolderRootPrefix("");
             setActiveFilePath(null);
           }
           const stored = localStorage.getItem(DISPLAY_NAME_KEY) ?? "";
@@ -348,14 +352,20 @@ export const App = () => {
         setJoinGate(res.status === 404 ? "missing" : "password");
         return;
       }
-      const data = (await res.json()) as { kind?: string; filePaths?: string[] };
+      const data = (await res.json()) as {
+        kind?: string;
+        filePaths?: string[];
+        folderPath?: string;
+      };
       if (data.kind === "folder" && Array.isArray(data.filePaths)) {
         setFolderMode(true);
         setFolderPaths(data.filePaths);
+        setFolderRootPrefix(typeof data.folderPath === "string" ? data.folderPath : "");
         setActiveFilePath(data.filePaths[0] ?? null);
       } else {
         setFolderMode(false);
         setFolderPaths([]);
+        setFolderRootPrefix("");
         setActiveFilePath(null);
       }
       setStarted(true);
@@ -706,6 +716,7 @@ export const App = () => {
                 <FileTreePanel
                   title={t("folder.treeTitle")}
                   paths={folderPaths}
+                  rootPrefix={folderRootPrefix}
                   activePath={activeFilePath}
                   onSelect={(p) => setActiveFilePath(p)}
                 />

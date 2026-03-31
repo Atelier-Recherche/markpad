@@ -145,5 +145,25 @@ export class MarkpadSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         })
       );
+
+    new Setting(containerEl)
+      .setName("Purger les ancres de partage dossier")
+      .setDesc(
+        "Arrête tous les partages dossier actifs, supprime les fichiers `.markpad-folder-share.md` restants et réinitialise l’état local (sessions serveur terminées si possible)."
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Purger…").onClick(() => {
+          void (async () => {
+            if (
+              !window.confirm(
+                "Supprimer les ancres .markpad-folder-share.md et réinitialiser les partages dossier ?"
+              )
+            ) {
+              return;
+            }
+            await this.plugin.purgeFolderShareAnchors();
+          })();
+        })
+      );
   }
 }

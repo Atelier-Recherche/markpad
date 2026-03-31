@@ -4,7 +4,7 @@ Markpad est un mono-repo de collaboration temps reel pour notes Markdown avec 3 
 
 - `plugin/` : plugin Obsidian (source de partage)
 - `server/` : backend Node.js + Yjs + WebSocket + Redis
-- `web/` : frontend React + CodeMirror 6 (markdown source, collab Yjs) + aperçu HTML, barre d’outils type Obsidian (icônes [Lucide](https://lucide.dev/))
+- `web/` : frontend React + CodeMirror 6 (markdown source, collab Yjs) + aperçu HTML, barre d’outils type Obsidian (icônes [Lucide](https://lucide.dev/)) ; l’arborescence des partages **dossier** affiche des chemins **relatifs** au dossier partagé (sans exposer le préfixe « en amont » du vault).
 
 ## Architecture
 
@@ -20,8 +20,9 @@ Markpad est un mono-repo de collaboration temps reel pour notes Markdown avec 3 
 - **Reconnexion automatique** (paramètre dans les réglages du plugin, activé par défaut) : si la note active contient déjà un partage et que `User ID` est renseigné, le plugin ouvre la session WebSocket au démarrage / au changement de note, sans relancer « Start Sharing ».
 - **Réconciliation** après le premier sync : le fichier `.md` sur le vault est comparé au corps du document Yjs (hors frontmatter). En cas de divergences (édition hors ligne, Redis vide ou ancien), le plugin applique un fusionnement par patches (diff-match-patch) dans Yjs pour limiter les pertes au lieu d’écraser un côté. Si Yjs est vide et la note locale non vide, le contenu local est réinjecté (protection **anti-vide** après redémarrage Redis/serveur).
 - **Barre d’état** : affiche notamment connecté, synchronisation en cours, ou hors ligne.
+- **Indicateurs dans l’explorateur et les onglets** (Lucide via l’API Obsidian) : icône **lien** pour une note partagée ; icône **dossiers** pour la racine d’un partage dossier. Pour la **session WebSocket active**, l’icône reflète l’état (ex. chargement pendant la connexion ou la réconciliation post-sync, rafraîchissement si Yjs n’est pas encore à jour, hors ligne si le WS est coupé).
 - **Sens Obsidian → Web** : en plus de y-codemirror, un petit module CodeMirror réaligne `Y.Text` sur le document si la frappe locale et Y divergent (contourne des cas où le binding CM→Y ne propage pas, selon la version Obsidian / Live Preview). La bonne instance `EditorView` est résolue (source, `editorComponent`, sous-mode d’édition) avant de monter la collab.
-- **Dépannage** : dans les réglages du plugin, activer « Logs diagnostic (console) », ouvrir la console développeur (Ctrl+Shift+I), filtrer sur `Markpad:collab` : tu verras les événements horodatés (résolution CM, pont, `Y.Doc update`, WebSocket, `editor-change`).
+- **Dépannage** : dans les réglages du plugin, activer « Logs diagnostic (console) », ouvrir la console développeur (Ctrl+Shift+I), filtrer sur `Markpad:collab` : tu verras les événements horodatés (résolution CM, pont, `Y.Doc update`, WebSocket, `editor-change`). En **partage dossier**, les lignes préfixées `folder:` détaillent le démarrage (`startSharing`, `attach computed`, clés du `Y.Map`, `syncFolderFilesFromY`, patch WebSocket sortant) — indispensable si la sync dossier ou les icônes dossier posent problème.
 
 ## Infrastructure Docker
 
@@ -43,13 +44,14 @@ Variables principales (voir [`.env.example`](.env.example)) :
 - `JWT_SECRET` — signature des jetons web (connexion par e-mail)
 - `ADMIN_EMAILS` — liste d’e-mails (séparés par des virgules) ayant le rôle admin à la première connexion
 - `MARKPAD_SQLITE_PATH` — fichier SQLite (métadonnées partages, utilisateurs, index)
+- `MAX_SHARES_PER_USER` — nombre maximal de **sessions de partage** actives par utilisateur dans l’index SQLite (défaut `200`) ; au-delà, `POST /sessions` répond **429** avec `{ "error": "share_limit_reached" }`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` — envoi des liens magiques (optionnel ; sans SMTP le lien est loggé dans la console serveur). **Important** : l’hôte SMTP est en général celui du **fournisseur de messagerie** (ex. `smtp.…`, `ssl0.ovh.net` pour une boîte OVH), pas forcément le nom de domaine du site seul ; si le port **465** ne se connecte pas, essayez **587** avec `SMTP_SECURE=false` (STARTTLS). Voir aussi `SMTP_CONNECTION_TIMEOUT_MS` dans `.env.example`.
 
 ## Web : interface invité
 
 - **Langue** : français, anglais, espagnol, allemand (sélecteur dans la barre du haut, mémorisé dans `localStorage`).
 - **Nom affiché** : mémorisé (`markpad-display-name`). Si la room n’a **pas** de mot de passe, la connexion se fait sans écran « Rejoindre ». **Clic droit** sur la pastille « Vous » pour renommer.
-- **Panneaux** : arborescence (partage dossier), éditeur, aperçu, plan — largeurs ajustables par poignées entre colonnes (jusqu’à ~72 % pour les panneaux latéraux).
+- **Panneaux** : arborescence (partage dossier), éditeur, aperçu, plan — largeurs ajustables par poignées entre colonnes (jusqu’à ~72 % pour les panneaux latéraux). Pour un partage dossier, les entrées de l’arborescence sont affichées en **chemin relatif** au dossier partagé ; le chemin complet du vault reste disponible en **infobulle** (`title`) sur chaque fichier.
 - **Routes utiles** : `/share/:roomId` (édition collaborative), `/auth/verify?token=…` (après le lien reçu par e-mail), `/me` (liste des partages avec un compte web), `/admin` (administration — voir ci‑dessous).
 
 ## Compte web et liste des partages
@@ -67,8 +69,19 @@ Variables principales (voir [`.env.example`](.env.example)) :
 ## Plugin Obsidian : partage dossier et panneau des partages
 
 - **Partager un dossier** : clic droit sur le dossier dans l’explorateur → « Markpad : partager ce dossier ». Un fichier **`.markpad-folder-share.md`** est créé dans le dossier ; les notes `.md` du dossier sont synchronisées dans une même room Yjs (`Y.Map` `files`).
-- **Dossier déjà partagé** : le même menu contextuel propose **copier le lien** et **arrêter le partage du dossier**.
-- **Panneau latéral** : commande **« Ouvrir le panneau des partages »** — liste tous les partages (notes et dossiers) avec **copier le lien** et **supprimer le partage** (côté serveur + nettoyage local).
+- **Dossier déjà partagé** : le même menu contextuel propose **copier le lien** et **arrêter le partage du dossier**. La ligne du dossier dans l’explorateur affiche aussi une **icône** (clic pour copier le lien du dossier).
+- **Panneau latéral** : commande **« Ouvrir le panneau des partages »** — liste tous les partages (notes et dossiers) avec **copier le lien** et **supprimer le partage** (côté serveur + nettoyage local). La liste se met à jour quand le frontmatter ou l’ancre change (y compris après suppression depuis le panneau).
+- **Suppression dans le vault** : supprimer l’ancre **`.markpad-folder-share.md`**, un **dossier** racine de partage, ou un **fichier** inclus dans un partage dossier met à jour ou termine le partage côté plugin et serveur (selon le cas : arrêt du dossier, retrait d’un fichier, ou dernière note → fin de room). Pour une **note seule** partagée, la suppression du fichier déclenche aussi la fin de session côté serveur (meilleur effort).
+- **Renommage / déplacement** : renommer ou déplacer un dossier ou une note **dans** un partage dossier met à jour les chemins dans la méta locale, l’ancre et, si une session dossier est ouverte, les **clés** du `Y.Map` `files` pour rester aligné avec le web.
+- **Clic droit sur une note** dans un dossier partagé : **arrêter le partage** ne supprime plus toute la room par erreur : le fichier est **retiré** du partage dossier ; la room n’est fermée que s’il ne reste plus aucun fichier.
+- **Réglages** : bouton **« Purger… »** (section fin de page) — après confirmation, arrêt des partages dossier, suppression des fichiers **`.markpad-folder-share.md`** restants et réinitialisation de l’état local (sessions serveur terminées si possible).
+
+## Désynchronisation et reconnexion (rappel)
+
+- **Note seule, auteur Obsidian** : après reconnexion, une **réconciliation** peut fusionner le `.md` local avec le `Y.Text` (voir plus haut) : en cas de forte divergence, le résultat est un **CRDT au niveau caractères**, pas une résolution « intelligente » du markdown.
+- **Note rejointe depuis Obsidian** (« join ») : le **distant** prime au premier sync ; le brouillon local peut être recouvert.
+- **Partage dossier** : pour le **contenu** des fichiers, **Yjs** est la source de vérité tant que les clients sont connectés ; le plugin écrit sur le disque depuis Y (ex. nouveaux fichiers vus sur le web). Après une coupure, la reprise suit le merge Yjs habituel.
+- Il n’y a pas de verrou « qui a raison » au niveau document : plusieurs éditeurs peuvent produire un texte **fusionné** caractère par caractère.
 
 ## Prerequis
 

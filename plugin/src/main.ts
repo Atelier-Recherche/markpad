@@ -4,6 +4,7 @@ import {
   Modal,
   Notice,
   normalizePath,
+  setIcon,
   TAbstractFile,
   Plugin,
   PluginManifest,
@@ -13,9 +14,16 @@ import {
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import {
+  applyYTextToCm,
+  hideReadonlyBanner,
+  isCollabMounted,
+  mountCollabEditable,
   mountCollabExtension,
   mountCollabExtensionWithYText,
+  remountCollabExtensionForYText,
   resolveObsidianEditorView,
+  setCollabEditable,
+  unmountCollabEditable,
   unmountCollabExtension
 } from "./codemirrorBinding";
 import {
@@ -31,6 +39,7 @@ import {
   endShareSession,
   validateShareSession
 } from "./shareSession";
+import type { ReconcileStatus } from "./reconcile";
 import { t } from "./locale";
 import {
   DEFAULT_SETTINGS,
@@ -70,6 +79,24 @@ const SHARE_FRONTMATTER_KEY = "markpadShare";
 const FOLDER_SHARE_FILENAME = ".markpad-folder-share.md";
 const FOLDER_SHARE_FM = "markpadFolderShare";
 
+const MARKPAD_INDICATOR_CSS = `
+.markpad-shared-indicator,
+.markpad-folder-shared-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.markpad-shared-indicator svg,
+.markpad-folder-shared-indicator svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.85;
+}
+`;
+
 type FolderShareMeta = {
   roomId: string;
   shareUrl: string;
@@ -77,41 +104,6 @@ type FolderShareMeta = {
   anchorPath: string;
 };
 
-const stripMarkpadShareFrontmatter = (raw: string): string => {
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const match = normalized.match(/^---\n([\s\S]*?)\n(?:---|\.\.\.)\n?/);
-  if (!match) return raw;
-  const body = match[1] ?? "";
-  const rest = normalized.slice(match[0].length);
-  const lines = body.split("\n");
-  const kept: string[] = [];
-  let removed = false;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    if (/^markpadShare\s*:\s*$/.test(line)) {
-      removed = true;
-      i += 1;
-      while (i < lines.length && /^\s+/.test(lines[i] ?? "")) {
-        i += 1;
-      }
-      i -= 1;
-      continue;
-    }
-    if (/^markpadShare\s*:\s*.+$/.test(line)) {
-      removed = true;
-      continue;
-    }
-    kept.push(line);
-  }
-
-  if (!removed) return raw;
-  const next =
-    kept.filter((l) => l.trim().length > 0).length === 0
-      ? rest
-      : `---\n${kept.join("\n")}\n---\n${rest}`;
-  return raw.includes("\r\n") ? next.replace(/\n/g, "\r\n") : next;
-};
 
 const parentPathOf = (path: string): string => {
   const idx = path.lastIndexOf("/");
@@ -259,6 +251,23 @@ export default class MarkpadPlugin extends Plugin {
   /** File ancre dossier : file d’attente par chemin pour éviter courses create/modify. */
   private folderAnchorWriteQueue = new Map<string, Promise<unknown>>();
   private autoConnectTimer: ReturnType<typeof window.setTimeout> | null = null;
+  /** Délai avant passage en lecture seule après une coupure WS (évite le flash sur reconnects brefs). */
+  private collabReadonlyTimer: ReturnType<typeof window.setTimeout> | null = null;
+  /** Vrai dès que le WS s'est connecté au moins une fois dans la session courante. */
+  private collabHasEverConnected = false;
+  /** Vrai si la note est actuellement en lecture seule (WS perdu). */
+  private collabIsReadonly = false;
+  /** État WS pour l’icône de la session active (connecting / connected / disconnected). */
+  private collabWsStatus: "connecting" | "connected" | "disconnected" = "disconnected";
+  /** Reconcile post-sync note en cours (affiche une icône « chargement »). */
+  private postSyncReconcileRunning = false;
+  private fileExplorerObserver: MutationObserver | null = null;
+  private fileExplorerObservedEl: HTMLElement | null = null;
+  /** Débounce : la liste virtualisée mutate en continu (~chaque frame) ; sans délai on saturerait le CPU. */
+  private explorerMutateDebounceTimer: ReturnType<typeof window.setTimeout> | null = null;
+  /** Évite la réentrance : sync Yjs / layout peuvent rappeler decorate pendant un decorate. */
+  private decorateSharedUiRunning = false;
+  private decorateSharedUiCoalesce = false;
 
   public constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
@@ -271,6 +280,11 @@ export default class MarkpadPlugin extends Plugin {
     this.registerView(MARKPAD_SHARES_VIEW_TYPE, (leaf) => new MarkpadSharesView(leaf, this));
     this.statusBarEl = this.addStatusBarItem();
     this.updateStatusBar("off");
+
+    const styleEl = document.createElement("style");
+    styleEl.textContent = MARKPAD_INDICATOR_CSS;
+    document.head.appendChild(styleEl);
+    this.register(() => styleEl.remove());
 
     const L = this.settings.locale;
     this.addCommand({
@@ -377,20 +391,44 @@ export default class MarkpadPlugin extends Plugin {
       this.app.workspace.on("active-leaf-change", () => this.decorateSharedUi())
     );
     this.registerEvent(
-      this.app.workspace.on("layout-change", () => this.decorateSharedUi())
+      this.app.workspace.on("layout-change", () => {
+        this.scheduleDecorateSharedUiSoon();
+        this.ensureFileExplorerDecorationObserver();
+      })
     );
     this.registerEvent(
-      this.app.workspace.on("file-open", () => this.decorateSharedUi())
+      this.app.workspace.on("file-open", (file) => {
+        this.decorateSharedUi();
+        // Cacher le bandeau readonly si la note ouverte n'est pas la note partagée.
+        // Obsidian réutilise le même EditorView pour toutes les notes d'un leaf, donc
+        // le bandeau resterait visible sinon.
+        if (
+          !file ||
+          !this.activeRuntime ||
+          this.activeRuntime.filePath !== file.path ||
+          this.activeRuntime.mode !== "note"
+        ) {
+          const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (activeView) {
+            const cm = resolveObsidianEditorView(activeView);
+            if (cm) hideReadonlyBanner(cm);
+          }
+        }
+        if (file) void this.onFileOpenReattach(file);
+      })
     );
     this.registerDomEvent(document, "click", (event) => {
       const trigger = (event.target as HTMLElement | null)?.closest(
-        ".markpad-shared-indicator"
+        ".markpad-shared-indicator, .markpad-folder-shared-indicator"
       ) as HTMLElement | null;
       if (!trigger) return;
       event.preventDefault();
       const host = trigger.closest("[data-path]") as HTMLElement | null;
       const path = host?.getAttribute("data-path");
-      if (path) {
+      if (!path) return;
+      if (trigger.classList.contains("markpad-folder-shared-indicator")) {
+        void this.copyShareLinkForFolder(path);
+      } else {
         void this.copyShareLinkForPath(path);
       }
     });
@@ -399,33 +437,39 @@ export default class MarkpadPlugin extends Plugin {
     this.rebuildSharedNotesFromFrontmatter();
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (this.isMarkdownFile(file)) {
-          this.syncShareFromFileFrontmatter(file);
-          this.decorateSharedUi();
+        if (!this.isMarkdownFile(file)) return;
+        const before = this.getSharesPanelSignature();
+        this.syncShareFromFileFrontmatter(file);
+        this.decorateSharedUi();
+        if (this.getSharesPanelSignature() !== before) {
+          this.refreshSharesPanel();
         }
       })
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof TFile) {
-          this.sharedNotes.delete(file.path);
-          this.decorateSharedUi();
-        }
+        void this.handleVaultDelete(file);
       })
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
+        if (file instanceof TFolder) {
+          void this.applyFolderShareAfterFolderRename(oldPath, file.path);
+          return;
+        }
         if (!(file instanceof TFile)) return;
         const share = this.sharedNotes.get(oldPath);
         if (share) {
           this.sharedNotes.delete(oldPath);
           this.sharedNotes.set(file.path, share);
         } else if (this.isMarkdownFile(file)) {
-          // Fallback différé: le metadata cache peut être en retard juste après rename.
           window.setTimeout(() => {
+            const before = this.getSharesPanelSignature();
             this.syncShareFromFileFrontmatter(file);
             this.decorateSharedUi();
-            this.refreshSharesPanel();
+            if (this.getSharesPanelSignature() !== before) {
+              this.refreshSharesPanel();
+            }
           }, 120);
         }
 
@@ -448,6 +492,7 @@ export default class MarkpadPlugin extends Plugin {
             } else {
               this.folderSharesMeta.set(root, meta);
             }
+            this.migrateYMapKeyAfterFileRename(oldPath, file.path, meta.roomId);
           }
         }
 
@@ -460,8 +505,20 @@ export default class MarkpadPlugin extends Plugin {
     );
     this.decorateSharedUi();
     this.app.workspace.onLayoutReady(() => {
+      this.ensureFileExplorerDecorationObserver();
+      // Reconstruire la map après que le metadataCache soit prêt.
+      // L'appel préalable (ligne ~437) peut avoir trouvé un cache vide si Obsidian
+      // n'avait pas encore indexé les fichiers.
+      this.rebuildSharedNotesFromFrontmatter();
       this.queueAutoConnect();
     });
+    // Mettre à jour sharedNotes quand le cache d'un fichier est (re)calculé.
+    // Couvre le cas où le cache arrive après onLayoutReady.
+    this.registerEvent(
+      this.app.metadataCache.on("changed", (file) => {
+        this.syncShareFromFileFrontmatter(file);
+      })
+    );
     this.registerEvent(
       this.app.vault.on("create", (file) => {
         if (!(file instanceof TFile) || !this.isMarkdownFile(file)) return;
@@ -481,6 +538,7 @@ export default class MarkpadPlugin extends Plugin {
       window.clearTimeout(this.autoConnectTimer);
       this.autoConnectTimer = null;
     }
+    this.teardownFileExplorerDecorationObserver();
     this.disconnect();
   }
 
@@ -540,8 +598,27 @@ export default class MarkpadPlugin extends Plugin {
       ) {
         if (this.activeRuntime.filePath !== active.file.path) {
           await this.switchFolderActiveFile(active.file);
-        } else if (!this.activeRuntime.provider.wsconnected) {
-          this.activeRuntime.provider.connect();
+        } else {
+          // Même fichier : vérifier si l'état CM a été réinitialisé (navigation hors dossier puis retour).
+          const currentCm = resolveObsidianEditorView(active.view);
+          if (currentCm) {
+            const cmChanged = currentCm !== this.activeRuntime.cmView;
+            const notMounted = !isCollabMounted(currentCm);
+            if (cmChanged || notMounted) {
+              markpadCollabDebug("folder:re-mount après navigation", { cmChanged, notMounted });
+              if (cmChanged) {
+                try { unmountCollabEditable(this.activeRuntime.cmView); } catch { /* stale */ }
+                try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* stale */ }
+                this.activeRuntime.cmView = currentCm;
+              }
+              remountCollabExtensionForYText(currentCm, this.activeRuntime.yText, this.activeRuntime.provider.awareness);
+              applyYTextToCm(currentCm, this.activeRuntime.yText);
+              mountCollabEditable(currentCm, !this.collabIsReadonly);
+            }
+          }
+          if (!this.activeRuntime.provider.wsconnected) {
+            this.activeRuntime.provider.connect();
+          }
         }
         return;
       }
@@ -565,8 +642,35 @@ export default class MarkpadPlugin extends Plugin {
     if (!share) return;
 
     if (this.activeRuntime?.filePath === active.file.path && this.activeRuntime.mode === "note") {
-      if (this.activeRuntime.provider.wsconnected) return;
-      this.activeRuntime.provider.connect();
+      // Vérifier que la collab extension est encore montée sur l'état CM courant.
+      // Obsidian réinitialise l'état de l'EditorView quand on navigue vers un autre fichier
+      // dans la même feuille : le Compartment appendConfig est alors perdu.
+      const currentCm = resolveObsidianEditorView(active.view);
+      if (currentCm) {
+        const cmChanged = currentCm !== this.activeRuntime.cmView;
+        const notMounted = !isCollabMounted(currentCm);
+        if (cmChanged || notMounted) {
+          markpadCollabDebug("note:re-mount après navigation", {
+            cmChanged,
+            notMounted,
+            yLen: this.activeRuntime.yText.toString().length
+          });
+          if (cmChanged) {
+            try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* vue périmée */ }
+            this.activeRuntime.cmView = currentCm;
+          }
+          remountCollabExtensionForYText(
+            currentCm,
+            this.activeRuntime.yText,
+            this.activeRuntime.provider.awareness
+          );
+          // Sync initial explicite Y→CM (y-codemirror.next ne le fait pas automatiquement).
+          applyYTextToCm(currentCm, this.activeRuntime.yText);
+        }
+      }
+      if (!this.activeRuntime.provider.wsconnected) {
+        this.activeRuntime.provider.connect();
+      }
       return;
     }
 
@@ -587,6 +691,115 @@ export default class MarkpadPlugin extends Plugin {
     }
   }
 
+  /**
+   * Re-monte la collab extension immédiatement à l'ouverture d'un fichier,
+   * sans attendre le debounce de 450ms de `queueAutoConnect`.
+   * Si la note partagée vient d'être (re)ouverte, yCollab pousse Y → CM dès maintenant,
+   * appliquant tous les changements distants reçus pendant que la note était fermée.
+   */
+  private async onFileOpenReattach(file: TFile): Promise<void> {
+    if (!this.activeRuntime) return;
+
+    // Mode dossier : re-mount immédiat si le même fichier est rouvert et que l'état CM a été réinitialisé.
+    // Les changements de fichier dans le dossier sont gérés par onFolderLeafChange / switchFolderActiveFile.
+    if (this.activeRuntime.mode === "folder") {
+      if (
+        this.activeRuntime.filePath !== file.path ||
+        !this.activeRuntime.sharedPaths?.includes(file.path)
+      ) return;
+
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      const folderView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!folderView || folderView.file?.path !== file.path) return;
+      const folderCm = resolveObsidianEditorView(folderView);
+      if (!folderCm) return;
+      const folderCmChanged = folderCm !== this.activeRuntime.cmView;
+      const folderNotMounted = !isCollabMounted(folderCm);
+      if (!folderCmChanged && !folderNotMounted) return;
+
+      markpadCollabDebug("folder:file-open re-mount immédiat", {
+        folderCmChanged,
+        folderNotMounted,
+        yLen: this.activeRuntime.yText.toString().length
+      });
+
+      if (folderCmChanged) {
+        try { unmountCollabEditable(this.activeRuntime.cmView); } catch { /* stale */ }
+        try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* stale */ }
+        this.activeRuntime.cmView = folderCm;
+      }
+      remountCollabExtensionForYText(folderCm, this.activeRuntime.yText, this.activeRuntime.provider.awareness);
+      const folderSynced = applyYTextToCm(folderCm, this.activeRuntime.yText);
+      markpadCollabDebug("folder:file-open sync Y→CM initial", {
+        folderSynced,
+        yLen: this.activeRuntime.yText.toString().length,
+        cmLen: folderCm.state.doc.toString().length
+      });
+      mountCollabEditable(folderCm, !this.collabIsReadonly);
+      if (!this.activeRuntime.provider.wsconnected) {
+        this.activeRuntime.provider.connect();
+      }
+      return;
+    }
+
+    if (
+      this.activeRuntime.filePath !== file.path ||
+      this.activeRuntime.mode !== "note"
+    ) return;
+
+    // Laisser un tick pour qu'Obsidian charge le contenu du fichier dans l'éditeur CM.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+    // Récupérer la vue active après le tick.
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || view.file?.path !== file.path) return;
+
+    const currentCm = resolveObsidianEditorView(view);
+    if (!currentCm) return;
+
+    const cmChanged = currentCm !== this.activeRuntime.cmView;
+    const notMounted = !isCollabMounted(currentCm);
+    if (!cmChanged && !notMounted) return;
+
+    markpadCollabDebug("file-open: re-mount immédiat", {
+      cmChanged,
+      notMounted,
+      yLen: this.activeRuntime.yText.toString().length
+    });
+
+    if (cmChanged) {
+      try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* vue périmée */ }
+      this.activeRuntime.cmView = currentCm;
+    }
+
+    remountCollabExtensionForYText(
+      currentCm,
+      this.activeRuntime.yText,
+      this.activeRuntime.provider.awareness
+    );
+
+    // Sync initial explicite Y→CM.
+    // y-codemirror.next ne fait AUCUN sync initial dans son constructeur : seules les
+    // futures mutations Y.Text sont propagées. Sans cette étape, CM garderait l'ancien
+    // contenu du disque et le premier frappe de l'utilisateur écraserait les changements
+    // distants (bridge CM→Y).
+    const synced = applyYTextToCm(currentCm, this.activeRuntime.yText);
+    markpadCollabDebug("file-open: sync Y→CM initial", {
+      synced,
+      yLen: this.activeRuntime.yText.toString().length,
+      cmLen: currentCm.state.doc.toString().length
+    });
+
+    // Restaurer l'état éditable : on se base sur collabIsReadonly (décidé après 3 s sans
+    // connexion) plutôt que sur wsconnected seul, pour ne pas bypasser le mode readonly
+    // suite à une simple navigation vers un autre note et retour.
+    const editable = !this.collabIsReadonly;
+    mountCollabEditable(currentCm, editable);
+    if (!this.activeRuntime.provider.wsconnected) {
+      this.activeRuntime.provider.connect();
+    }
+  }
+
   private schedulePostSyncReconcile(
     file: TFile,
     doc: Y.Doc,
@@ -597,23 +810,30 @@ export default class MarkpadPlugin extends Plugin {
     const run = async () => {
       if (ran) return;
       ran = true;
+      this.postSyncReconcileRunning = true;
+      this.decorateSharedUi();
       this.updateStatusBar("syncing");
       markpadCollabDebug("postSync reconcile: démarrage", { path: file.path });
       try {
         const local = await this.app.vault.read(file);
-        const localForY = stripMarkpadShareFrontmatter(local);
+        const localForY = local;
         const yBefore = yText.toString().length;
-        const changed = reconcileLocalMarkdownIntoY(doc, yText, localForY);
+        const status: ReconcileStatus = reconcileLocalMarkdownIntoY(doc, yText, localForY);
         const yAfter = yText.toString().length;
         markpadCollabDebug("postSync reconcile: fin", {
-          changed,
+          status,
           localLen: localForY.length,
           yLenBefore: yBefore,
           yLenAfter: yAfter
         });
+        if (status === "conflict") {
+          await this.handleReconcileConflict(file, localForY);
+        }
       } catch (e) {
         markpadCollabDebug("postSync reconcile: erreur", e);
       } finally {
+        this.postSyncReconcileRunning = false;
+        this.decorateSharedUi();
         if (this.activeRuntime?.provider === provider) {
           this.updatePresenceInStatusBar(provider);
         }
@@ -628,6 +848,38 @@ export default class MarkpadPlugin extends Plugin {
     };
     provider.on("sync", onSync);
     if (provider.synced) void run();
+  }
+
+  /**
+   * Quand le reconcile détecte un conflit (zones modifiées en même temps côté local
+   * et côté collaboratif distant), on :
+   * 1. Sauvegarde la version locale dans un fichier `.conflict.md`
+   * 2. Laisse Y.Text intact (la version collaborative fait foi)
+   * 3. Notifie l'utilisateur
+   */
+  private async handleReconcileConflict(file: TFile, localContent: string): Promise<void> {
+    const conflictPath = file.path.replace(/\.md$/, ".conflict.md");
+    markpadCollabDebug("postSync reconcile: conflit → sauvegarde", { conflictPath });
+    try {
+      const existing = this.app.vault.getAbstractFileByPath(conflictPath);
+      if (existing instanceof TFile) {
+        await this.app.vault.modify(existing, localContent);
+      } else {
+        await this.app.vault.create(conflictPath, localContent);
+      }
+      new Notice(
+        `Markpad: conflits détectés sur « ${file.name} ».\n` +
+        `Vos modifications locales hors-ligne ont été sauvegardées dans « ${conflictPath} ».\n` +
+        `Le contenu collaboratif est conservé dans la note d'origine.`,
+        12000
+      );
+    } catch (err) {
+      markpadCollabDebug("handleReconcileConflict: échec sauvegarde", err);
+      new Notice(
+        `Markpad: conflits détectés sur « ${file.name} » mais impossible de créer le fichier de sauvegarde. ` +
+        `Vos modifications locales hors-ligne ont été perdues.`
+      );
+    }
   }
 
   private async attachSharedSession(
@@ -646,7 +898,7 @@ export default class MarkpadPlugin extends Plugin {
     const doc = new Y.Doc();
     const yText = doc.getText("content");
     if (options.seedFullFromEditor) {
-      const full = stripMarkpadShareFrontmatter(view.editor.getValue());
+      const full = view.editor.getValue();
       if (full.length > 0) {
         yText.insert(0, full);
       }
@@ -659,26 +911,58 @@ export default class MarkpadPlugin extends Plugin {
         password: options.roomPassword ?? ""
       }
     });
-    patchYWebsocketProviderOutbound(provider);
-    markpadCollabDebug("patchYWebsocketProviderOutbound appliqué (envoi Y → WS via origin !== provider)");
+    const patchNote = patchYWebsocketProviderOutbound(provider);
+    markpadCollabDebug(
+      patchNote
+        ? "patchYWebsocketProviderOutbound OK (note)"
+        : "patchYWebsocketProviderOutbound ÉCHOUÉ (note) — _updateHandler absent",
+      { patchNote }
+    );
 
     provider.awareness.setLocalStateField("user", {
       name: this.settings.displayName,
       color: this.settings.color
     });
     provider.awareness.on("change", () => this.updatePresenceInStatusBar(provider));
+    // y-websocket n'émet 'disconnected' que sur fermeture volontaire ; lors d'une
+    // coupure réseau, il passe directement 'connected' → 'connecting' (retry loop).
+    // Le timer de lecture seule doit donc se déclencher aussi sur 'connecting',
+    // mais uniquement après une première connexion (évite le readonly au démarrage).
     provider.on("status", (event: { status: "connected" | "disconnected" | "connecting" }) => {
       markpadCollabDebug("WebsocketProvider status", event);
       if (event.status === "connected") {
+        this.collabHasEverConnected = true;
+        this.collabIsReadonly = false;
+        this.collabWsStatus = "connected";
         this.updatePresenceInStatusBar(provider);
+        this.decorateSharedUi();
+        // Annuler le timer de readonly et rendre la note éditable immédiatement.
+        if (this.collabReadonlyTimer !== null) {
+          window.clearTimeout(this.collabReadonlyTimer);
+          this.collabReadonlyTimer = null;
+        }
+        if (this.activeRuntime?.mode === "note" && this.activeRuntime.cmView) {
+          setCollabEditable(this.activeRuntime.cmView, true);
+          markpadCollabDebug("note: éditable (WS reconnecté)");
+        }
         return;
       }
       if (event.status === "connecting") {
+        this.collabWsStatus = "connecting";
         this.updateStatusBar("connecting");
+        this.decorateSharedUi();
+        // Coupure réseau : y-websocket ne passe jamais par 'disconnected' lors d'un retry,
+        // on démarre le timer ici (annulé si reconnexion < 3 s).
+        this.startCollabReadonlyTimerIfNeeded(provider);
         return;
       }
+      // 'disconnected' : fermeture volontaire ou erreur fatale.
+      this.collabWsStatus = "disconnected";
       this.updateStatusBar("offline");
+      this.decorateSharedUi();
+      this.startCollabReadonlyTimerIfNeeded(provider);
     });
+    // Ne pas appeler decorateSharedUi sur chaque sync Yjs : ça sature le thread UI et peut casser CM↔Y.
 
     markpadCollabDebug("attachSharedSession", {
       roomId,
@@ -696,6 +980,9 @@ export default class MarkpadPlugin extends Plugin {
     }
 
     mountCollabExtension(cm, doc, provider.awareness);
+    // Monter le compartment éditable. La note démarre éditable si le WS est déjà connecté
+    // (cas re-attach), sinon éditable aussi car on attend le premier événement "status".
+    mountCollabEditable(cm, true);
     markpadCollabDebug("collab montée sur EditorView", {
       cmDocLen: cm.state.doc.toString().length,
       yLen: yText.toString().length
@@ -717,6 +1004,7 @@ export default class MarkpadPlugin extends Plugin {
       };
     }
 
+    this.collabWsStatus = provider.wsconnected ? "connected" : "connecting";
     this.activeRuntime = {
       mode: "note",
       filePath: file.path,
@@ -900,6 +1188,9 @@ export default class MarkpadPlugin extends Plugin {
     if (status === "403") {
       return "Markpad: refusé (403). Vérifie que User ID correspond bien au compte du JWT.";
     }
+    if (status === "429" || msg.includes("share_limit_reached")) {
+      return "Markpad: nombre maximum de partages atteint pour ce compte (limite serveur).";
+    }
     if (msg.includes("folder_create_failed:")) {
       return `Markpad: impossible de créer le dossier local (${msg.split(":").slice(1).join(":")}).`;
     }
@@ -970,8 +1261,39 @@ export default class MarkpadPlugin extends Plugin {
     return candidate;
   }
 
+  /**
+   * Démarre le timer de passage en lecture seule (3 s après coupure WS).
+   * Partagé entre le mode note et le mode dossier.
+   */
+  private startCollabReadonlyTimerIfNeeded(provider: WebsocketProvider): void {
+    if (this.collabIsReadonly) return;
+    if (this.collabReadonlyTimer !== null) return;
+    this.collabReadonlyTimer = window.setTimeout(() => {
+      this.collabReadonlyTimer = null;
+      if (
+        this.activeRuntime?.provider === provider &&
+        !provider.wsconnected &&
+        this.activeRuntime.cmView
+      ) {
+        this.collabIsReadonly = true;
+        setCollabEditable(this.activeRuntime.cmView, false);
+        markpadCollabDebug("lecture seule (WS déconnecté > 3 s)");
+        new Notice(
+          "Markpad: connexion perdue — note en lecture seule.\nVos modifications seront appliquées au reconnect.",
+          8000
+        );
+      }
+    }, 3000);
+  }
+
   private disconnect(): void {
     if (!this.activeRuntime) return;
+    if (this.collabReadonlyTimer !== null) {
+      window.clearTimeout(this.collabReadonlyTimer);
+      this.collabReadonlyTimer = null;
+    }
+    this.collabHasEverConnected = false;
+    this.collabIsReadonly = false;
     try {
       this.activeRuntime.debugUnload?.();
     } catch {
@@ -983,15 +1305,22 @@ export default class MarkpadPlugin extends Plugin {
       // ignore
     }
     try {
+      // Restaurer l'editable avant de demonter (sinon la feuille reste bloquee en lecture seule).
+      unmountCollabEditable(this.activeRuntime.cmView);
+    } catch {
+      // ignore
+    }
+    try {
       unmountCollabExtension(this.activeRuntime.cmView);
     } catch {
-      // La vue peut être invalide si l’onglet a été fermé.
+      // La vue peut etre invalide si l'onglet a ete ferme.
     }
     markpadCollabDebug("disconnect()");
     this.activeRuntime.provider.destroy();
     this.activeRuntime.doc.destroy();
     this.activeRuntime = null;
     this.clearDecorations();
+    this.collabWsStatus = "disconnected";
     this.updateStatusBar("off");
   }
 
@@ -1068,6 +1397,13 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async stopSharingPath(filePath: string): Promise<void> {
+    for (const [root, meta] of this.folderSharesMeta) {
+      if (meta.paths.includes(filePath)) {
+        await this.removeSingleFileFromFolderShare(filePath, root, meta);
+        return;
+      }
+    }
+
     const share = this.sharedNotes.get(filePath);
     if (!share) {
       new Notice("Cette note n'est pas marquée comme partagée.");
@@ -1129,39 +1465,398 @@ export default class MarkpadPlugin extends Plugin {
     this.decoratedEls.clear();
   }
 
-  private decorateSharedUi(): void {
-    this.clearDecorations();
-    if (this.sharedNotes.size === 0) return;
-
-    const fileTitles = document.querySelectorAll<HTMLElement>(".nav-file-title[data-path]");
-    fileTitles.forEach((title) => {
-      const path = title.getAttribute("data-path");
-      if (!path || !this.sharedNotes.has(path)) return;
-      const icon = this.buildSharedIndicator();
-      title.appendChild(icon);
-      this.decoratedEls.add(icon);
-    });
-
-    const tabHeaders = document.querySelectorAll<HTMLElement>(
-      ".workspace-tab-header[data-path]"
-    );
-    tabHeaders.forEach((tab) => {
-      const path = tab.getAttribute("data-path");
-      if (!path || !this.sharedNotes.has(path)) return;
-      const titleEl =
-        tab.querySelector<HTMLElement>(".workspace-tab-header-inner-title") ?? tab;
-      const icon = this.buildSharedIndicator();
-      titleEl.appendChild(icon);
-      this.decoratedEls.add(icon);
+  /** Double frame : l’explorateur virtualisé monte souvent le DOM après `layout-change`. */
+  private scheduleDecorateSharedUiSoon(): void {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => this.decorateSharedUi());
     });
   }
 
-  private buildSharedIndicator(): HTMLElement {
+  private teardownFileExplorerDecorationObserver(): void {
+    if (this.explorerMutateDebounceTimer != null) {
+      window.clearTimeout(this.explorerMutateDebounceTimer);
+      this.explorerMutateDebounceTimer = null;
+    }
+    this.fileExplorerObserver?.disconnect();
+    this.fileExplorerObserver = null;
+    this.fileExplorerObservedEl = null;
+  }
+
+  /**
+   * Recolle un MutationObserver sur le conteneur de l’explorateur de fichiers
+   * (listes virtualisées : les lignes dossier n’existent pas au premier paint).
+   */
+  private ensureFileExplorerDecorationObserver(): void {
+    if (this.folderSharesMeta.size === 0) {
+      this.teardownFileExplorerDecorationObserver();
+      return;
+    }
+    const leaves = this.app.workspace.getLeavesOfType("file-explorer");
+    const leaf = leaves[0];
+    if (!leaf) return;
+    const view = leaf.view as { containerEl?: HTMLElement };
+    const root = view?.containerEl;
+    if (!root || root === this.fileExplorerObservedEl) return;
+
+    this.teardownFileExplorerDecorationObserver();
+    this.fileExplorerObservedEl = root;
+    this.fileExplorerObserver = new MutationObserver(() => {
+      if (this.decorateSharedUiRunning) return;
+      if (this.explorerMutateDebounceTimer != null) {
+        window.clearTimeout(this.explorerMutateDebounceTimer);
+      }
+      this.explorerMutateDebounceTimer = window.setTimeout(() => {
+        this.explorerMutateDebounceTimer = null;
+        if (this.decorateSharedUiRunning) return;
+        this.decorateSharedUi();
+      }, 400);
+    });
+    this.fileExplorerObserver.observe(root, { childList: true, subtree: true });
+  }
+
+  /** Clé `folderSharesMeta` correspondant au chemin affiché dans le DOM (normalisation). */
+  private resolveFolderShareMetaKey(domPath: string): string | null {
+    if (this.folderSharesMeta.has(domPath)) return domPath;
+    const n = normalizePath(domPath);
+    if (this.folderSharesMeta.has(n)) return n;
+    for (const k of this.folderSharesMeta.keys()) {
+      if (normalizePath(k) === n) return k;
+    }
+    return null;
+  }
+
+  private collectFolderDecorationMounts(): Array<{ metaKey: string; mount: HTMLElement }> {
+    const out: Array<{ metaKey: string; mount: HTMLElement }> = [];
+    const seen = new Set<string>();
+
+    const push = (rawPath: string | null, mount: HTMLElement | null | undefined): void => {
+      if (!rawPath || !mount) return;
+      const key = this.resolveFolderShareMetaKey(rawPath);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push({ metaKey: key, mount });
+    };
+
+    // Obsidian récent : tree item + self[data-path]
+    document
+      .querySelectorAll<HTMLElement>(".tree-item.nav-folder .tree-item-self[data-path]")
+      .forEach((self) => {
+        push(self.getAttribute("data-path"), self);
+      });
+
+    // Ancien UI : data-path sur .nav-folder
+    document.querySelectorAll<HTMLElement>(".nav-folder[data-path]").forEach((folderEl) => {
+      push(
+        folderEl.getAttribute("data-path"),
+        folderEl.querySelector<HTMLElement>(".nav-folder-title") ?? folderEl
+      );
+    });
+
+    document.querySelectorAll<HTMLElement>(".nav-folder-title[data-path]").forEach((title) => {
+      push(title.getAttribute("data-path"), title);
+    });
+
+    // Fallback : data-path sur un enfant (virtualisation / thèmes)
+    document.querySelectorAll<HTMLElement>(".nav-folder").forEach((folderEl) => {
+      const p =
+        folderEl.getAttribute("data-path") ??
+        folderEl.querySelector<HTMLElement>(".tree-item-self[data-path]")?.getAttribute("data-path") ??
+        folderEl.querySelector<HTMLElement>("[data-path]")?.getAttribute("data-path") ??
+        null;
+      const mount =
+        folderEl.querySelector<HTMLElement>(".tree-item-self") ??
+        folderEl.querySelector<HTMLElement>(".nav-folder-title") ??
+        folderEl.querySelector<HTMLElement>(".tree-item-inner") ??
+        folderEl;
+      push(p, mount);
+    });
+
+    return out;
+  }
+
+  private decorateSharedUi(): void {
+    if (this.decorateSharedUiRunning) {
+      this.decorateSharedUiCoalesce = true;
+      return;
+    }
+    this.decorateSharedUiRunning = true;
+
+    let explorerWasObserving = false;
+    if (this.fileExplorerObserver && this.fileExplorerObservedEl) {
+      this.fileExplorerObserver.disconnect();
+      explorerWasObserving = true;
+    }
+
+    try {
+      this.clearDecorations();
+      if (this.sharedNotes.size === 0 && this.folderSharesMeta.size === 0) return;
+
+      const fileTitles = document.querySelectorAll<HTMLElement>(".nav-file-title[data-path]");
+      fileTitles.forEach((title) => {
+        const path = title.getAttribute("data-path");
+        if (!path || !this.sharedNotes.has(path)) return;
+        const icon = this.buildNoteSharedIndicator(path);
+        title.appendChild(icon);
+        this.decoratedEls.add(icon);
+      });
+
+      const tabHeaders = document.querySelectorAll<HTMLElement>(
+        ".workspace-tab-header[data-path]"
+      );
+      tabHeaders.forEach((tab) => {
+        const path = tab.getAttribute("data-path");
+        if (!path || !this.sharedNotes.has(path)) return;
+        const titleEl =
+          tab.querySelector<HTMLElement>(".workspace-tab-header-inner-title") ?? tab;
+        const icon = this.buildNoteSharedIndicator(path);
+        titleEl.appendChild(icon);
+        this.decoratedEls.add(icon);
+      });
+
+      for (const { metaKey, mount } of this.collectFolderDecorationMounts()) {
+        const icon = this.buildFolderSharedIndicator(metaKey);
+        mount.appendChild(icon);
+        this.decoratedEls.add(icon);
+      }
+
+      if (this.folderSharesMeta.size > 0) {
+        this.ensureFileExplorerDecorationObserver();
+      }
+    } finally {
+      if (
+        explorerWasObserving &&
+        this.fileExplorerObserver &&
+        this.fileExplorerObservedEl
+      ) {
+        this.fileExplorerObserver.observe(this.fileExplorerObservedEl, {
+          childList: true,
+          subtree: true
+        });
+      }
+      this.decorateSharedUiRunning = false;
+      if (this.decorateSharedUiCoalesce) {
+        this.decorateSharedUiCoalesce = false;
+        queueMicrotask(() => this.decorateSharedUi());
+      }
+    }
+  }
+
+  /** Icône Lucide pour la session active (sync / WS / reconcile). */
+  private getActiveSessionIconName(): string {
+    if (!this.activeRuntime) return "link-2";
+    const p = this.activeRuntime.provider;
+    if (this.postSyncReconcileRunning) return "loader-2";
+    if (this.collabWsStatus === "connecting") return "loader-2";
+    if (!p.wsconnected) return "wifi-off";
+    if (!p.synced) return "refresh-cw";
+    return "link-2";
+  }
+
+  private buildNoteSharedIndicator(filePath: string): HTMLElement {
     const indicator = document.createElement("span");
     indicator.className = "markpad-shared-indicator";
-    indicator.textContent = " 🔗";
-    indicator.title = "Markpad partagé (clic ou clic droit pour copier le lien)";
+    const active = this.activeRuntime?.filePath === filePath;
+    setIcon(indicator, active ? this.getActiveSessionIconName() : "link-2");
+    indicator.title = "Markpad partagé (clic pour copier le lien)";
     return indicator;
+  }
+
+  private buildFolderSharedIndicator(folderRootPath: string): HTMLElement {
+    const indicator = document.createElement("span");
+    indicator.className = "markpad-folder-shared-indicator";
+    const active =
+      this.activeRuntime?.mode === "folder" &&
+      this.activeRuntime.folderRoot === folderRootPath;
+    setIcon(indicator, active ? this.getActiveSessionIconName() : "folders");
+    indicator.title = "Dossier Markpad partagé (clic pour copier le lien)";
+    return indicator;
+  }
+
+  /** Signature compacte de la liste des partages (panneau latéral). */
+  private getSharesPanelSignature(): string {
+    return this.getSharesForPanel()
+      .map((r) => `${r.kind}:${r.pathKey}:${r.roomId}`)
+      .sort()
+      .join("|");
+  }
+
+  private migrateYMapKeyAfterFileRename(oldPath: string, newPath: string, roomId: string): void {
+    if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
+    if (this.activeRuntime.roomId !== roomId) return;
+    const files = this.activeRuntime.doc.getMap("files");
+    const yText = files.get(oldPath);
+    if (!(yText instanceof Y.Text)) return;
+    this.activeRuntime.doc.transact(() => {
+      files.delete(oldPath);
+      files.set(newPath, yText);
+    }, "markpad-rename-file-key");
+  }
+
+  private migrateFolderKeysInYDoc(oldRoot: string, newRoot: string, roomId: string): void {
+    if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
+    if (this.activeRuntime.roomId !== roomId) return;
+    const files = this.activeRuntime.doc.getMap("files");
+    const entries = Array.from(files.entries());
+    for (const [k, v] of entries) {
+      if (!(v instanceof Y.Text)) continue;
+      let newKey: string | null = null;
+      if (k.startsWith(`${oldRoot}/`)) {
+        newKey = `${newRoot}/${k.slice(oldRoot.length + 1)}`;
+      } else if (k === oldRoot) {
+        newKey = newRoot;
+      }
+      if (newKey == null || newKey === k) continue;
+      this.activeRuntime.doc.transact(() => {
+        files.delete(k);
+        files.set(newKey, v);
+      }, "markpad-rename-folder-keys");
+    }
+  }
+
+  private async applyFolderShareAfterFolderRename(oldPath: string, newPath: string): Promise<void> {
+    const remap = (p: string): string => {
+      if (p === oldPath) return newPath;
+      if (p.startsWith(`${oldPath}/`)) return `${newPath}/${p.slice(oldPath.length + 1)}`;
+      return p;
+    };
+
+    for (const [root, meta] of Array.from(this.folderSharesMeta.entries())) {
+      if (root !== oldPath && !root.startsWith(`${oldPath}/`)) continue;
+      const newRoot = remap(root);
+      this.folderSharesMeta.delete(root);
+      meta.paths = [...new Set(meta.paths.map(remap))];
+      meta.anchorPath = remap(meta.anchorPath);
+      this.folderSharesMeta.set(newRoot, meta);
+      for (const p of meta.paths) {
+        this.sharedNotes.set(p, { roomId: meta.roomId, shareUrl: meta.shareUrl });
+      }
+      this.migrateFolderKeysInYDoc(root, newRoot, meta.roomId);
+      if (
+        this.activeRuntime?.mode === "folder" &&
+        this.activeRuntime.roomId === meta.roomId
+      ) {
+        this.activeRuntime.folderRoot = newRoot;
+        this.activeRuntime.sharedPaths = meta.paths;
+        this.activeRuntime.filePath = remap(this.activeRuntime.filePath);
+      }
+      try {
+        await this.ensureFolderAnchorFile(meta.anchorPath, meta, meta.paths);
+      } catch {
+        // meilleur effort
+      }
+    }
+    this.rebuildSharedNotesFromFrontmatter();
+    this.decorateSharedUi();
+    this.refreshSharesPanel();
+  }
+
+  private async handleVaultDelete(file: TAbstractFile): Promise<void> {
+    if (file instanceof TFolder) {
+      for (const [root] of Array.from(this.folderSharesMeta.entries())) {
+        if (root === file.path || root.startsWith(`${file.path}/`)) {
+          await this.stopSharingFolderByPath(root);
+        }
+      }
+      return;
+    }
+    if (!(file instanceof TFile)) return;
+
+    if (file.name === FOLDER_SHARE_FILENAME) {
+      const root = file.parent?.path ?? "";
+      const meta = this.folderSharesMeta.get(root);
+      if (meta && normalizePath(meta.anchorPath) === normalizePath(file.path)) {
+        await this.stopSharingFolderByPath(root);
+      }
+      return;
+    }
+
+    for (const [root, meta] of this.folderSharesMeta) {
+      if (!meta.paths.includes(file.path)) continue;
+      await this.removeSingleFileFromFolderShare(file.path, root, meta);
+      return;
+    }
+
+    const share = this.sharedNotes.get(file.path);
+    if (!share) return;
+    try {
+      await endShareSession({
+        serverUrl: this.settings.serverUrl,
+        settings: this.settings,
+        roomId: share.roomId
+      });
+    } catch {
+      // room déjà absente
+    }
+    this.sharedNotes.delete(file.path);
+    if (this.activeRuntime?.filePath === file.path) {
+      this.disconnect();
+    } else {
+      this.decorateSharedUi();
+    }
+    this.refreshSharesPanel();
+  }
+
+  /** Retire un fichier du partage dossier (room conservée s’il reste des fichiers). */
+  private async removeSingleFileFromFolderShare(
+    filePath: string,
+    folderRoot: string,
+    meta: FolderShareMeta
+  ): Promise<void> {
+    if (!meta.paths.includes(filePath)) return;
+    if (this.activeRuntime?.mode === "folder" && this.activeRuntime.roomId === meta.roomId) {
+      const files = this.activeRuntime.doc.getMap("files");
+      this.activeRuntime.doc.transact(() => {
+        files.delete(filePath);
+      }, "markpad-remove-file-from-folder");
+      if (this.activeRuntime.filePath === filePath) {
+        this.disconnect();
+      }
+    }
+    meta.paths = meta.paths.filter((p) => p !== filePath);
+    this.sharedNotes.delete(filePath);
+    this.folderSharesMeta.set(folderRoot, meta);
+    if (
+      this.activeRuntime?.mode === "folder" &&
+      this.activeRuntime.roomId === meta.roomId
+    ) {
+      this.activeRuntime.sharedPaths = meta.paths;
+    }
+
+    if (meta.paths.length === 0) {
+      try {
+        await endShareSession({
+          serverUrl: this.settings.serverUrl,
+          settings: this.settings,
+          roomId: meta.roomId
+        });
+      } catch {
+        // ignore
+      }
+      this.folderSharesMeta.delete(folderRoot);
+      const anchor = this.app.vault.getAbstractFileByPath(meta.anchorPath);
+      if (anchor instanceof TFile) {
+        try {
+          await this.app.vault.delete(anchor);
+        } catch {
+          try {
+            await this.app.fileManager.processFrontMatter(anchor, (fm) => {
+              delete fm[FOLDER_SHARE_FM];
+            });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } else {
+      try {
+        await this.ensureFolderAnchorFile(meta.anchorPath, meta, meta.paths);
+      } catch {
+        // ignore
+      }
+    }
+    this.decorateSharedUi();
+    this.refreshSharesPanel();
+    new Notice("Fichier retiré du partage dossier Markpad.");
   }
 
   private rebuildSharedNotesFromFrontmatter(): void {
@@ -1245,6 +1940,12 @@ export default class MarkpadPlugin extends Plugin {
     }
     this.disconnect();
     const anchorPath = normalizePath(`${folder.path}/${FOLDER_SHARE_FILENAME}`);
+    markpadCollabDebug("folder:startSharing", {
+      folderPath: folder.path,
+      anchorPath,
+      mdFiles: paths.length,
+      pathsPreview: paths.slice(0, 8)
+    });
     try {
       const created = await createFolderShareSession({
         serverUrl: this.settings.serverUrl,
@@ -1334,7 +2035,7 @@ export default class MarkpadPlugin extends Plugin {
     if (anchorDir) {
       await this.ensureFolderTree(anchorDir);
     }
-    let existing = this.app.vault.getAbstractFileByPath(pathNorm);
+    const existing = this.app.vault.getAbstractFileByPath(pathNorm);
     if (existing instanceof TFile) {
       await this.app.vault.modify(existing, body);
       return;
@@ -1415,7 +2116,13 @@ export default class MarkpadPlugin extends Plugin {
         password: this.settings.defaultRoomPassword ?? ""
       }
     });
-    patchYWebsocketProviderOutbound(provider);
+    const patchFolder = patchYWebsocketProviderOutbound(provider);
+    markpadCollabDebug(
+      patchFolder
+        ? "folder:patchYWebsocket OK"
+        : "folder:patchYWebsocket ÉCHOUÉ — _updateHandler absent (sortie WS cassée ?)",
+      { patchFolder, roomId: meta.roomId, seedLocalFiles: options.seedLocalFiles }
+    );
     provider.awareness.setLocalStateField("user", {
       name: this.settings.displayName,
       color: this.settings.color
@@ -1423,15 +2130,37 @@ export default class MarkpadPlugin extends Plugin {
     provider.awareness.setLocalStateField("cursor", null);
     provider.awareness.on("change", () => this.updatePresenceInStatusBar(provider));
     provider.on("status", (event: { status: "connected" | "disconnected" | "connecting" }) => {
+      markpadCollabDebug("folder:provider status", event);
       if (event.status === "connected") {
+        this.collabHasEverConnected = true;
+        this.collabIsReadonly = false;
+        this.collabWsStatus = "connected";
         this.updatePresenceInStatusBar(provider);
+        this.decorateSharedUi();
+        if (this.collabReadonlyTimer !== null) {
+          window.clearTimeout(this.collabReadonlyTimer);
+          this.collabReadonlyTimer = null;
+        }
+        if (this.activeRuntime?.provider === provider && this.activeRuntime.cmView) {
+          setCollabEditable(this.activeRuntime.cmView, true);
+          markpadCollabDebug("folder: éditable (WS reconnecté)");
+        }
         return;
       }
       if (event.status === "connecting") {
+        this.collabWsStatus = "connecting";
         this.updateStatusBar("connecting");
+        this.decorateSharedUi();
+        this.startCollabReadonlyTimerIfNeeded(provider);
         return;
       }
+      this.collabWsStatus = "disconnected";
       this.updateStatusBar("offline");
+      this.decorateSharedUi();
+      this.startCollabReadonlyTimerIfNeeded(provider);
+    });
+    provider.on("sync", (synced: boolean) => {
+      markpadCollabDebug("folder:provider sync", { synced, wsconnected: provider.wsconnected });
     });
     if (!provider.synced) {
       await new Promise<void>((resolve) => {
@@ -1456,6 +2185,8 @@ export default class MarkpadPlugin extends Plugin {
       throw new Error("no_cm");
     }
     mountCollabExtensionWithYText(cm, yText, provider.awareness);
+    applyYTextToCm(cm, yText);
+    mountCollabEditable(cm, true);
     let debugUnload: (() => void) | undefined;
     if (this.settings.debugCollab) {
       const onYUpdate = (update: Uint8Array, origin: unknown): void => {
@@ -1472,18 +2203,36 @@ export default class MarkpadPlugin extends Plugin {
       };
     }
     const anchorF = this.app.vault.getAbstractFileByPath(meta.anchorPath);
-    const folderRoot =
+    let folderRoot =
       anchorF instanceof TFile
         ? anchorF.parent?.path ?? ""
         : parentPathOf(normalizePath(meta.anchorPath));
+    if (!folderRoot && meta.paths[0]) {
+      folderRoot = parentPathOf(meta.paths[0]);
+      markpadCollabDebug("folder:attach folderRoot dérivé de meta.paths[0] (ancre absente du cache)", {
+        folderRoot,
+        firstPath: meta.paths[0]
+      });
+    }
+    markpadCollabDebug("folder:attach computed", {
+      folderRoot,
+      anchorPath: meta.anchorPath,
+      activeFile: file.path,
+      yMapKeys: [...files.keys()],
+      metaPathsCount: meta.paths.length,
+      wsconnected: provider.wsconnected,
+      synced: provider.synced
+    });
     const filesMap = doc.getMap("files");
     const onFilesChange = (): void => {
       if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
         return;
       }
+      markpadCollabDebug("folder:Y.Map(files) observe → syncFolderFilesFromY");
       void this.syncFolderFilesFromY(meta, folderRoot, doc);
     };
     filesMap.observe(onFilesChange);
+    this.collabWsStatus = provider.wsconnected ? "connected" : "connecting";
     this.activeRuntime = {
       mode: "folder",
       filePath: file.path,
@@ -1537,19 +2286,35 @@ export default class MarkpadPlugin extends Plugin {
     doc: Y.Doc
   ): Promise<void> {
     if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
+      markpadCollabDebug("folder:syncFolderFilesFromY skip (pas de runtime dossier actif)");
       return;
     }
     const files = doc.getMap("files");
+    markpadCollabDebug("folder:syncFolderFilesFromY enter", {
+      folderRoot,
+      mapEntries: files.size,
+      metaPaths: meta.paths.length
+    });
     let changed = false;
     for (const [path, value] of files.entries()) {
-      if (!(value instanceof Y.Text)) continue;
-      if (!path.endsWith(".md")) continue;
-      if (!isPathInFolder(path, folderRoot)) continue;
+      if (!(value instanceof Y.Text)) {
+        markpadCollabDebug("folder:sync skip (valeur non Y.Text)", path);
+        continue;
+      }
+      if (!path.endsWith(".md")) {
+        markpadCollabDebug("folder:sync skip (non .md)", path);
+        continue;
+      }
+      if (!isPathInFolder(path, folderRoot)) {
+        markpadCollabDebug("folder:sync skip (hors folderRoot)", { path, folderRoot });
+        continue;
+      }
       if (path.endsWith(`/${FOLDER_SHARE_FILENAME}`)) continue;
       if (!meta.paths.includes(path)) {
         meta.paths.push(path);
         this.sharedNotes.set(path, { roomId: meta.roomId, shareUrl: meta.shareUrl });
         changed = true;
+        markpadCollabDebug("folder:sync nouvelle entrée meta depuis Y", path);
       }
       const existing = this.app.vault.getAbstractFileByPath(path);
       if (!existing) {
@@ -1560,8 +2325,9 @@ export default class MarkpadPlugin extends Plugin {
           }
           await this.app.vault.create(path, value.toString());
           changed = true;
-        } catch {
-          // Si un autre watcher l'a créé entre temps, on ignore.
+          markpadCollabDebug("folder:sync fichier créé sur le vault depuis Y", path);
+        } catch (e) {
+          markpadCollabDebug("folder:sync création vault échouée", path, e);
         }
       }
     }
@@ -1574,6 +2340,7 @@ export default class MarkpadPlugin extends Plugin {
 
   private async switchFolderActiveFile(file: TFile): Promise<void> {
     if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
+    if (this.activeRuntime.filePath === file.path) return;
     const files = this.activeRuntime.doc.getMap("files");
     let yText = files.get(file.path) as Y.Text | undefined;
     if (!yText) {
@@ -1584,11 +2351,15 @@ export default class MarkpadPlugin extends Plugin {
       }
       this.activeRuntime.doc.transact(() => files.set(file.path, yText!));
     }
-    unmountCollabExtension(this.activeRuntime.cmView);
+    const cm = this.activeRuntime.cmView;
+    // Démonte les deux compartments proprement pour éviter une double extension sur le nouveau fichier.
+    unmountCollabEditable(cm);
+    unmountCollabExtension(cm);
     this.activeRuntime.yText = yText;
-    mountCollabExtensionWithYText(this.activeRuntime.cmView, yText, this.activeRuntime.provider.awareness);
     this.activeRuntime.filePath = file.path;
-    // Idem: pas de reconcile automatique en switch de fichier dossier.
+    mountCollabExtensionWithYText(cm, yText, this.activeRuntime.provider.awareness);
+    applyYTextToCm(cm, yText);
+    mountCollabEditable(cm, !this.collabIsReadonly);
     this.decorateSharedUi();
   }
 
@@ -1637,6 +2408,31 @@ export default class MarkpadPlugin extends Plugin {
     } else {
       await this.stopSharingPath(row.pathKey);
     }
+  }
+
+  /** Supprime les fichiers ancre `.markpad-folder-share.md`, arrête les sessions côté serveur (meilleur effort) et réinitialise l’état local. */
+  public async purgeFolderShareAnchors(): Promise<void> {
+    const roots = Array.from(this.folderSharesMeta.keys());
+    for (const root of roots) {
+      await this.stopSharingFolderByPath(root);
+    }
+    const orphans: TFile[] = [];
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (f.name === FOLDER_SHARE_FILENAME) orphans.push(f);
+    }
+    for (const f of orphans) {
+      try {
+        await this.app.vault.delete(f);
+      } catch {
+        // ignore
+      }
+    }
+    this.folderSharesMeta.clear();
+    this.rebuildSharedNotesFromFrontmatter();
+    this.disconnect();
+    this.decorateSharedUi();
+    this.refreshSharesPanel();
+    new Notice("Fichiers .markpad-folder-share.md supprimés et métadonnées dossier réinitialisées.");
   }
 
   public refreshSharesPanel(): void {
