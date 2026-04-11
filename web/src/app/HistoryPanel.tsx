@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { RefreshCw } from "lucide-react";
+import { HistoryDiffBody } from "./historyDiff";
 
 type SnapshotMeta = {
   id: number;
@@ -16,6 +18,8 @@ type Props = {
   httpBaseUrl: string;
   activeFilePath?: string | null;
   folderMode: boolean;
+  /** Contenu éditeur actuel pour comparaison (surlignage des différences). */
+  currentContent: string;
 };
 
 const formatDate = (iso: string): string => {
@@ -26,7 +30,13 @@ const formatDate = (iso: string): string => {
   }
 };
 
-export const HistoryPanel = ({ roomId, httpBaseUrl, activeFilePath, folderMode }: Props) => {
+export const HistoryPanel = ({
+  roomId,
+  httpBaseUrl,
+  activeFilePath,
+  folderMode,
+  currentContent
+}: Props) => {
   const { t } = useTranslation();
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
   const [loading, setLoading] = useState(false);
@@ -78,16 +88,16 @@ export const HistoryPanel = ({ roomId, httpBaseUrl, activeFilePath, folderMode }
 
   return (
     <aside className="history-panel">
-      <div className="history-panel__header">
-        <h3>{t("history.title")}</h3>
+      <div className="history-panel__head">
+        <h3 className="history-panel__title">{t("history.title")}</h3>
         <button
           type="button"
-          className="history-panel__refresh"
+          className="obsidian-tool history-panel__refresh"
           title={t("history.refresh")}
           onClick={() => void fetchSnapshots()}
           aria-label={t("history.refresh")}
         >
-          ↺
+          <RefreshCw size={18} strokeWidth={2} />
         </button>
       </div>
 
@@ -96,16 +106,16 @@ export const HistoryPanel = ({ roomId, httpBaseUrl, activeFilePath, folderMode }
       ) : snapshots.length === 0 ? (
         <p className="history-panel__status">{t("history.empty")}</p>
       ) : (
-        <ul className="history-panel__list">
+        <div className="history-panel__entries">
           {snapshots.map((snap) => (
-            <li key={snap.id} className="history-panel__item">
+            <div key={snap.id} className="history-panel__block">
               <button
                 type="button"
-                className={`history-panel__entry${selected?.id === snap.id ? " history-panel__entry--active" : ""}`}
+                className={`history-panel__row${selected?.id === snap.id ? " history-panel__row--active" : ""}`}
                 onClick={() => void loadContent(snap.id)}
               >
                 <span className="history-panel__date">{formatDate(snap.snapshot_at)}</span>
-                <span className="history-panel__size">
+                <span className="history-panel__meta">
                   {t("history.chars", { count: snap.content_length })}
                 </span>
                 {snap.file_path ? (
@@ -115,13 +125,22 @@ export const HistoryPanel = ({ roomId, httpBaseUrl, activeFilePath, folderMode }
                 ) : null}
               </button>
               {selected?.id === snap.id ? (
-                <pre className="history-panel__content">
-                  {loadingContent ? t("history.loading") : selected.content}
-                </pre>
+                <div className="history-panel__preview">
+                  {loadingContent ? (
+                    <p className="history-panel__status">{t("history.loading")}</p>
+                  ) : (
+                    <>
+                      <p className="history-panel__diff-legend">{t("history.diffLegend")}</p>
+                      <div className="history-panel__diff-scroll">
+                        <HistoryDiffBody snapshot={selected.content} current={currentContent} />
+                      </div>
+                    </>
+                  )}
+                </div>
               ) : null}
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </aside>
   );

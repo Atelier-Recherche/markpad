@@ -53,7 +53,8 @@
     "empty": "Keine Snapshots verfügbar.",
     "loading": "Laden…",
     "refresh": "Aktualisieren",
-    "chars": "{{count}} Zeichen"
+    "chars": "{{count}} Zeichen",
+    "diffLegend": "Im Vergleich zum aktuellen Dokument — Hervorhebungen zeigen Unterschiede."
   },
   "toc": {
     "title": "Gliederung",

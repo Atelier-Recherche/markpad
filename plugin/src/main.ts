@@ -625,7 +625,12 @@ export default class MarkpadPlugin extends Plugin {
   private async tryAutoConnectActiveFile(): Promise<void> {
     if (!this.settings.autoReconnect || !this.settings.userId) return;
     const active = this.getActiveMarkdownFileAndView();
-    if (!active) return;
+    if (!active) {
+      // Si on sort de Markdown / de la vue active, on coupe la session collab existante.
+      // Sinon, y-websocket garde une boucle de reconnexion même hors document partagé.
+      if (this.activeRuntime && this.activeRuntime.mode !== "folder") this.disconnect();
+      return;
+    }
 
     for (const meta of this.folderSharesMeta.values()) {
       if (!meta.paths.includes(active.file.path)) continue;
@@ -676,7 +681,25 @@ export default class MarkpadPlugin extends Plugin {
     }
 
     const share = this.sharedNotes.get(active.file.path);
-    if (!share) return;
+    if (!share) {
+      // On est sur un Markdown mais pas sur une note partagée : stop la session collab courante.
+      if (this.activeRuntime) {
+        // En mode dossier, la vue active peut être le fichier ancre
+        // `.markpad-folder-share.md` (qui n'est pas dans `sharedNotes`).
+        // On évite donc de déconnecter dans ce cas.
+        if (this.activeRuntime.mode === "folder") {
+          const folderRoot = this.activeRuntime.folderRoot ?? "";
+          const path = active.file.path;
+          const withinFolderRoot =
+            folderRoot.length > 0 &&
+            (path === folderRoot || path.startsWith(`${folderRoot}/`));
+          if (!withinFolderRoot) this.disconnect();
+        } else {
+          this.disconnect();
+        }
+      }
+      return;
+    }
 
     if (this.activeRuntime?.filePath === active.file.path && this.activeRuntime.mode === "note") {
       // Vérifier que la collab extension est encore montée sur l'état CM courant.
@@ -718,7 +741,10 @@ export default class MarkpadPlugin extends Plugin {
     try {
       await this.attachSharedSession(active.file, active.view, share.roomId, share.shareUrl, {
         roomPassword: this.settings.defaultRoomPassword || undefined,
-        seedFullFromEditor: false
+          seedFullFromEditor: false,
+          // Auto-connect / reconnexion : le distant est la source de vérité au premier sync,
+          // sinon on peut re-fusionner le local et provoquer un doublage.
+          reconcileLocalOnFirstSync: false
       });
     } catch (error) {
       const msg = (error as Error).message;
@@ -1024,9 +1050,17 @@ export default class MarkpadPlugin extends Plugin {
     }
 
     mountCollabExtension(cm, doc, provider.awareness);
+    // En auto-connect / re-attach (`seedFullFromEditor: false`), y-codemirror ne fait
+    // pas de sync initial Y→CM dans son constructeur. Sans cette étape, le pont
+    // CM→Y peut pousser le contenu local dans Y avant d'avoir reçu l'état distant,
+    // ce qui peut aboutir à un doublage après reconnexion.
+    if (!options.seedFullFromEditor) {
+      applyYTextToCm(cm, yText);
+    }
     // Monter le compartment éditable. La note démarre éditable si le WS est déjà connecté
     // (cas re-attach), sinon éditable aussi car on attend le premier événement "status".
-    mountCollabEditable(cm, true);
+    const initialEditable = options.seedFullFromEditor || provider.wsconnected;
+    mountCollabEditable(cm, initialEditable);
     markpadCollabDebug("collab montée sur EditorView", {
       cmDocLen: cm.state.doc.toString().length,
       yLen: yText.toString().length
@@ -2616,6 +2650,11 @@ export default class MarkpadPlugin extends Plugin {
       filePath: this.activeRuntime.mode === "folder" ? (this.activeRuntime.filePath ?? null) : null,
       kind: this.activeRuntime.mode
     };
+  }
+
+  public getActiveSharedDocumentText(): string | null {
+    if (!this.activeRuntime) return null;
+    return this.activeRuntime.yText.toString();
   }
 
   public async openHistoryPanel(): Promise<void> {

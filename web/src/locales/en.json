@@ -53,7 +53,8 @@
     "empty": "No snapshots available yet.",
     "loading": "Loading…",
     "refresh": "Refresh",
-    "chars": "{{count}} characters"
+    "chars": "{{count}} characters",
+    "diffLegend": "Compared to the current document — highlights show what differs."
   },
   "toc": {
     "title": "Outline",

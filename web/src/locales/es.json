@@ -53,7 +53,8 @@
     "empty": "No hay instantáneas disponibles.",
     "loading": "Cargando…",
     "refresh": "Actualizar",
-    "chars": "{{count}} caracteres"
+    "chars": "{{count}} caracteres",
+    "diffLegend": "Frente al documento actual — el resaltado muestra las diferencias."
   },
   "toc": {
     "title": "Esquema",

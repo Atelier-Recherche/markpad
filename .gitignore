@@ -8,3 +8,4 @@ coverage/
 server/.redis-data/
 plugin/main.js
 plugin/styles.css
+deploy-to-morglaf.ps1

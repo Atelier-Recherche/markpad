@@ -12,6 +12,7 @@
   "dependencies": {
     "@codemirror/lang-markdown": "^6.3.4",
     "codemirror": "^6.0.2",
+    "diff": "^8.0.4",
     "i18next": "^26.0.1",
     "lib0": "^0.2.102",
     "lucide-react": "^0.544.0",

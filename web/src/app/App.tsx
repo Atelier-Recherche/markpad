@@ -846,6 +846,7 @@ export const App = () => {
                   httpBaseUrl={httpBaseUrl}
                   folderMode={folderMode}
                   activeFilePath={activeFilePath}
+                  currentContent={markdown}
                 />
               </Panel>
             </>

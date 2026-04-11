@@ -53,7 +53,8 @@
     "empty": "Aucun snapshot disponible.",
     "loading": "Chargement…",
     "refresh": "Rafraîchir",
-    "chars": "{{count}} caractères"
+    "chars": "{{count}} caractères",
+    "diffLegend": "Par rapport au document actuel — le surlignage indique ce qui diffère."
   },
   "toc": {
     "title": "Plan",
