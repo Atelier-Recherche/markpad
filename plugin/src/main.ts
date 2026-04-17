@@ -994,6 +994,50 @@ export default class MarkpadPlugin extends Plugin {
       color: this.settings.color
     });
     provider.awareness.on("change", () => this.updatePresenceInStatusBar(provider));
+    let mountedCm: import("@codemirror/view").EditorView | null = null;
+    const requireInitialSyncBeforeEdit = !options.seedFullFromEditor;
+    let initialRemoteApplied = false;
+    const applyInitialRemoteState = (): void => {
+      if (initialRemoteApplied) return;
+      initialRemoteApplied = true;
+      try {
+        // Au "join"/auto-reconnect, on applique Y→CM uniquement après le premier sync réseau.
+        // Sinon un Y.Text vide local (avant sync) peut effacer le buffer Obsidian.
+        const targetCm =
+          this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note"
+            ? this.activeRuntime.cmView
+            : mountedCm;
+        if (!targetCm) {
+          initialRemoteApplied = false;
+          return;
+        }
+        const synced = applyYTextToCm(targetCm, yText);
+        markpadCollabDebug("note: sync Y→CM après premier sync provider", {
+          synced,
+          yLen: yText.toString().length,
+          cmLen: targetCm.state.doc.toString().length
+        });
+      } catch (error) {
+        // Ne jamais laisser une exception Yjs interrompre le re-attach.
+        markpadCollabDebug("note: erreur applyYTextToCm (post-sync)", error);
+      }
+      if (
+        this.activeRuntime?.provider === provider &&
+        this.activeRuntime.mode === "note" &&
+        provider.wsconnected &&
+        !this.collabIsReadonly
+      ) {
+        setCollabEditable(this.activeRuntime.cmView, true);
+        markpadCollabDebug("note: éditable (premier sync terminé)");
+      }
+    };
+    const onProviderSync = (synced: boolean): void => {
+      markpadCollabDebug("note:provider sync", { synced, wsconnected: provider.wsconnected });
+      if (!synced) return;
+      if (requireInitialSyncBeforeEdit) applyInitialRemoteState();
+      provider.off("sync", onProviderSync);
+    };
+    provider.on("sync", onProviderSync);
     // y-websocket n'émet 'disconnected' que sur fermeture volontaire ; lors d'une
     // coupure réseau, il passe directement 'connected' → 'connecting' (retry loop).
     // Le timer de lecture seule doit donc se déclencher aussi sur 'connecting',
@@ -1012,8 +1056,13 @@ export default class MarkpadPlugin extends Plugin {
           this.collabReadonlyTimer = null;
         }
         if (this.activeRuntime?.mode === "note" && this.activeRuntime.cmView) {
-          setCollabEditable(this.activeRuntime.cmView, true);
-          markpadCollabDebug("note: éditable (WS reconnecté)");
+          const canEditNow = !requireInitialSyncBeforeEdit || provider.synced;
+          setCollabEditable(this.activeRuntime.cmView, canEditNow);
+          markpadCollabDebug(
+            canEditNow
+              ? "note: éditable (WS reconnecté)"
+              : "note: connecté, attente sync initial (lecture seule)"
+          );
         }
         return;
       }
@@ -1050,16 +1099,22 @@ export default class MarkpadPlugin extends Plugin {
     }
 
     mountCollabExtension(cm, doc, provider.awareness);
-    // En auto-connect / re-attach (`seedFullFromEditor: false`), y-codemirror ne fait
-    // pas de sync initial Y→CM dans son constructeur. Sans cette étape, le pont
-    // CM→Y peut pousser le contenu local dans Y avant d'avoir reçu l'état distant,
-    // ce qui peut aboutir à un doublage après reconnexion.
-    if (!options.seedFullFromEditor) {
-      applyYTextToCm(cm, yText);
+    mountedCm = cm;
+    // En mode "start sharing", on seed le Y.Text depuis l'éditeur local, donc pas de
+    // dépendance au premier sync distant: on peut aligner CM immédiatement.
+    // En "join"/auto-reconnect, on attend le premier événement provider.sync(true)
+    // pour éviter d'appliquer un Y.Text vide local avant réception de l'état distant.
+    if (options.seedFullFromEditor) {
+      try {
+        applyYTextToCm(cm, yText);
+      } catch (error) {
+        markpadCollabDebug("note: erreur applyYTextToCm (seed local)", error);
+      }
     }
     // Monter le compartment éditable. La note démarre éditable si le WS est déjà connecté
-    // (cas re-attach), sinon éditable aussi car on attend le premier événement "status".
-    const initialEditable = options.seedFullFromEditor || provider.wsconnected;
+    // et qu'aucun sync initial n'est requis ; sinon lecture seule temporaire.
+    const initialEditable =
+      options.seedFullFromEditor || (provider.wsconnected && !requireInitialSyncBeforeEdit);
     mountCollabEditable(cm, initialEditable);
     markpadCollabDebug("collab montée sur EditorView", {
       cmDocLen: cm.state.doc.toString().length,
@@ -1096,6 +1151,11 @@ export default class MarkpadPlugin extends Plugin {
       debugUnload
     };
     this.sharedNotes.set(file.path, { roomId, shareUrl });
+    if (requireInitialSyncBeforeEdit && provider.synced) {
+      // Cas où le provider est déjà sync au moment du montage (re-attach ultra rapide).
+      applyInitialRemoteState();
+      provider.off("sync", onProviderSync);
+    }
     if (options.reconcileLocalOnFirstSync !== false) {
       this.schedulePostSyncReconcile(file, doc, yText, provider);
     }

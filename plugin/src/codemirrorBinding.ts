@@ -79,6 +79,13 @@ class MarkpadCmYBridge {
       this.skipNextUpdate = false;
       return;
     }
+    // Ne jamais "réconcilier" CM→Y sur des transactions non utilisateur
+    // (chargement de fichier, modifications programmatiques Obsidian, sync interne).
+    // Sinon on risque d'écraser l'état distant au re-attach.
+    const hasUserEvent = update.transactions.some(
+      (tr) => tr.annotation(Transaction.userEvent) != null
+    );
+    if (!hasUserEvent) return;
     const conf = update.state.facet(ySyncFacet);
     const ytext = conf.ytext;
     const cm = update.state.doc.toString();
@@ -130,6 +137,11 @@ export const mountCollabExtensionWithYText = (
 ): void => {
   const ext = createCollabExtensionForYText(yText, awareness);
   let compartment = compartmentByView.get(view);
+  if (compartment && !isCollabMounted(view)) {
+    // Obsidian a réinitialisé l'état CM : le Compartment mémorisé est périmé.
+    compartmentByView.delete(view);
+    compartment = undefined;
+  }
   if (!compartment) {
     compartment = new Compartment();
     compartmentByView.set(view, compartment);
@@ -138,9 +150,18 @@ export const mountCollabExtensionWithYText = (
     });
     return;
   }
-  view.dispatch({
-    effects: compartment.reconfigure(ext)
-  });
+  try {
+    view.dispatch({
+      effects: compartment.reconfigure(ext)
+    });
+  } catch {
+    // Reconfigure peut échouer si le Compartment n'existe plus dans l'état courant.
+    const fresh = new Compartment();
+    compartmentByView.set(view, fresh);
+    view.dispatch({
+      effects: StateEffect.appendConfig.of(fresh.of(ext))
+    });
+  }
 };
 
 export const mountCollabExtension = (
@@ -150,6 +171,11 @@ export const mountCollabExtension = (
 ): void => {
   const ext = createCollabExtension(doc, awareness);
   let compartment = compartmentByView.get(view);
+  if (compartment && !isCollabMounted(view)) {
+    // Obsidian a réinitialisé l'état CM : le Compartment mémorisé est périmé.
+    compartmentByView.delete(view);
+    compartment = undefined;
+  }
   if (!compartment) {
     compartment = new Compartment();
     compartmentByView.set(view, compartment);
@@ -158,18 +184,31 @@ export const mountCollabExtension = (
     });
     return;
   }
-  view.dispatch({
-    effects: compartment.reconfigure(ext)
-  });
+  try {
+    view.dispatch({
+      effects: compartment.reconfigure(ext)
+    });
+  } catch {
+    // Reconfigure peut échouer si le Compartment n'existe plus dans l'état courant.
+    const fresh = new Compartment();
+    compartmentByView.set(view, fresh);
+    view.dispatch({
+      effects: StateEffect.appendConfig.of(fresh.of(ext))
+    });
+  }
 };
 
 export const unmountCollabExtension = (view: EditorView): void => {
   const compartment = compartmentByView.get(view);
   if (!compartment) return;
-  view.dispatch({
-    effects: compartment.reconfigure([])
-  });
-  compartmentByView.delete(view);
+  try {
+    view.dispatch({
+      effects: compartment.reconfigure([])
+    });
+  } finally {
+    // Même si le dispatch échoue (vue périmée), il faut oublier ce Compartment.
+    compartmentByView.delete(view);
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -251,8 +290,12 @@ export const unmountCollabEditable = (view: EditorView): void => {
   hideReadonlyBanner(view);
   const compartment = editableCompartmentByView.get(view);
   if (!compartment) return;
-  view.dispatch({ effects: compartment.reconfigure([]) });
-  editableCompartmentByView.delete(view);
+  try {
+    view.dispatch({ effects: compartment.reconfigure([]) });
+  } finally {
+    // Évite de garder un Compartment éditable périmé après navigation.
+    editableCompartmentByView.delete(view);
+  }
 };
 
 /**
@@ -307,7 +350,16 @@ export const remountCollabExtensionForYText = (
 export const applyYTextToCm = (view: EditorView, yText: Y.Text): boolean => {
   const conf = view.state.facet(ySyncFacet) as { ytext?: Y.Text } | undefined;
   if (!conf?.ytext) return false;
-  const yContent = yText.toString();
+  // Sécurité: en cas de compartiment périmé, le facet peut référencer un autre Y.Text.
+  // On n'applique que la source effectivement branchée à y-codemirror.
+  const ySource = conf.ytext === yText ? yText : conf.ytext;
+  if (conf.ytext !== yText) {
+    markpadCollabDebug("applyYTextToCm: yText mismatch, usage du facet courant", {
+      expectedLen: yText.toString().length,
+      facetLen: conf.ytext.toString().length
+    });
+  }
+  const yContent = ySource.toString();
   const cmContent = view.state.doc.toString();
   if (yContent === cmContent) return false;
   // Informer le pont CM→Y de sauter ce dispatch (CM reçoit Y, pas l'inverse).
