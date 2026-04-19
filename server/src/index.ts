@@ -16,6 +16,9 @@ import { deleteShareRow, initDb, seedAllowPublicSignupIfMissing } from "./db/sql
 
 const app = express();
 app.disable("x-powered-by");
+if (config.trustProxy) {
+  app.set("trust proxy", 1);
+}
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(

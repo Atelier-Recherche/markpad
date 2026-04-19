@@ -60,6 +60,8 @@ export const config = {
   allowedApiKeys: parseList(process.env.ALLOWED_API_KEYS),
   rateLimitWindowMs: parseIntOr(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
   rateLimitMax: parseIntOr(process.env.RATE_LIMIT_MAX, 200),
+  /** Derrière un reverse proxy (obsidian.morglaf.com, etc.) : requis pour express-rate-limit (X-Forwarded-For). Désactiver avec TRUST_PROXY=0 */
+  trustProxy: parseBoolOrUndef(process.env.TRUST_PROXY) ?? true,
   maxRoomPasswordLength: parseIntOr(process.env.MAX_ROOM_PASSWORD_LENGTH, 128),
   /** Nombre maximal de sessions de partage actives par utilisateur (index SQLite `share_index`). */
   maxSharesPerUser: parseIntOr(process.env.MAX_SHARES_PER_USER, 200),

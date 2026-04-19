@@ -6,6 +6,7 @@ services:
       - redis_data:/data
 
   server:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -20,6 +21,7 @@ services:
       - redis
 
   web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: web/Dockerfile
