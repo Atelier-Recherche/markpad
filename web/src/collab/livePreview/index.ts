@@ -25,7 +25,7 @@ function buildDecorations(view: EditorView, config: Required<LivePreviewConfig>)
     ...(config.headings ? buildHeadingDecorations(view, cursorLines) : []),
     ...(config.bold ? buildBoldDecorations(view, cursorLines) : []),
     ...(config.italic ? buildItalicDecorations(view, cursorLines) : []),
-    ...(config.tables ? buildTableDecorations(view, cursorLines) : []),
+    ...(config.tables ? buildTableDecorations(view) : []),
     ...(config.taskLists ? buildTaskListDecorations(view, cursorLines) : []),
   ];
 
