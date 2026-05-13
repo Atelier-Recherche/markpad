@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { EditorSelection, EditorState, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, placeholder } from "@codemirror/view";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yCollab } from "y-codemirror.next";
 import { basicSetup } from "codemirror";
 import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbound";
@@ -251,7 +251,7 @@ export const createCollabEditor = (input: {
         doc: initial,
         extensions: [
           basicSetup,
-          markdown(),
+          markdown({ base: markdownLanguage }),
           markpadCmTheme,
           frontmatterHiddenField,
           createLivePreviewExtension(),
