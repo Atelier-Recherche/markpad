@@ -1,8 +1,8 @@
 FROM node:alpine AS deps
 WORKDIR /app
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY server/package.json server/package.json
-RUN npm install --workspace server
+RUN npm ci --workspace server
 
 FROM node:alpine AS build
 WORKDIR /app

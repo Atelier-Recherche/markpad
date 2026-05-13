@@ -1,8 +1,8 @@
 FROM node:alpine AS build
 WORKDIR /app
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY web/package.json web/package.json
-RUN npm install --workspace web
+RUN npm ci --workspace web
 COPY web ./web
 ARG VITE_SERVER_BASE_URL=http://localhost:1234
 ENV VITE_SERVER_BASE_URL=$VITE_SERVER_BASE_URL
