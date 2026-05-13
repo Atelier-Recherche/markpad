@@ -3,10 +3,14 @@ import type Database from "better-sqlite3";
 import { config } from "../config.js";
 import {
   deleteShareRow,
+  deleteChatMessagesByRoom,
+  deleteSnapshotsByRoom,
   getAllowPublicSignup,
   listAllShares,
   listUsers,
-  setAllowPublicSignup
+  setAllowPublicSignup,
+  getChatRetentionHours,
+  setChatRetentionHours
 } from "../db/sqlite.js";
 import type { RedisDocStore } from "../persistence/redisDocStore.js";
 import type { SessionStore } from "../sessionStore.js";
@@ -51,6 +55,8 @@ export const registerAdminApi = (
     await sessions.deleteSession(roomId);
     await docs.delete(roomId);
     deleteShareRow(db, roomId);
+    deleteSnapshotsByRoom(db, roomId);
+    deleteChatMessagesByRoom(db, roomId);
     res.status(204).send();
   });
 
@@ -63,19 +69,33 @@ export const registerAdminApi = (
   app.get("/admin/settings", async (req, res) => {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
-    res.json({ allowPublicSignup: getAllowPublicSignup(db) });
+    res.json({
+      allowPublicSignup: getAllowPublicSignup(db),
+      chatRetentionHours: getChatRetentionHours(db)
+    });
   });
 
   app.patch("/admin/settings", async (req, res) => {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
-    const body = req.body as { allowPublicSignup?: unknown };
-    if (typeof body.allowPublicSignup !== "boolean") {
-      res.status(400).json({ error: "allowPublicSignup_boolean_required" });
+    const body = req.body as { allowPublicSignup?: unknown; chatRetentionHours?: unknown };
+    let changed = false;
+    if (typeof body.allowPublicSignup === "boolean") {
+      setAllowPublicSignup(db, body.allowPublicSignup);
+      changed = true;
+    }
+    if (typeof body.chatRetentionHours === "number" && Number.isFinite(body.chatRetentionHours)) {
+      setChatRetentionHours(db, body.chatRetentionHours);
+      changed = true;
+    }
+    if (!changed) {
+      res.status(400).json({ error: "allowPublicSignup_or_chatRetentionHours_required" });
       return;
     }
-    setAllowPublicSignup(db, body.allowPublicSignup);
-    res.json({ allowPublicSignup: getAllowPublicSignup(db) });
+    res.json({
+      allowPublicSignup: getAllowPublicSignup(db),
+      chatRetentionHours: getChatRetentionHours(db)
+    });
   });
 
   app.delete("/admin/users/:userId", async (req, res) => {

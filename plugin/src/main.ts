@@ -2403,14 +2403,13 @@ export default class MarkpadPlugin extends Plugin {
         // Timeout de sécurité pour les réseaux mobiles instables (4G/Wi-Fi coupé).
         // Sans lui, la Promise ne se résoudrait jamais si le serveur est injoignable.
         // On continue sans premier sync ; Y.js se synchronisera dès que la connexion revient.
-        let timeoutId: number;
         const onSync = (synced: boolean) => {
           if (!synced) return;
           window.clearTimeout(timeoutId);
           provider.off("sync", onSync);
           resolve();
         };
-        timeoutId = window.setTimeout(() => {
+        const timeoutId = window.setTimeout(() => {
           provider.off("sync", onSync);
           markpadCollabDebug("folder:sync timeout 15 s — poursuite sans attente initiale");
           resolve();

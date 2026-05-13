@@ -8,6 +8,7 @@ import { buildHeadingDecorations } from "./headings";
 import { buildBoldDecorations } from "./bold";
 import { buildItalicDecorations } from "./italic";
 import { buildTableDecorations } from "./tables";
+import { buildTaskListDecorations } from "./taskLists";
 
 function buildDecorations(view: EditorView, config: Required<LivePreviewConfig>): DecorationSet {
   // Calcule toutes les lignes où se trouve un curseur (multi-curseur inclus)
@@ -25,6 +26,7 @@ function buildDecorations(view: EditorView, config: Required<LivePreviewConfig>)
     ...(config.bold ? buildBoldDecorations(view, cursorLines) : []),
     ...(config.italic ? buildItalicDecorations(view, cursorLines) : []),
     ...(config.tables ? buildTableDecorations(view, cursorLines) : []),
+    ...(config.taskLists ? buildTaskListDecorations(view, cursorLines) : []),
   ];
 
   // Les décorations doivent être triées par position croissante

@@ -5,10 +5,12 @@ import { config } from "../config.js";
 import { verifyJwt } from "./auth.js";
 import {
   countSharesByOwner,
+  deleteChatMessagesByRoom,
   deleteShareRow,
   deleteSnapshotsByRoom,
   getSnapshotContent,
   insertShareRow,
+  listRoomChatMessages,
   listSnapshotsMeta
 } from "../db/sqlite.js";
 import { RedisDocStore } from "../persistence/redisDocStore.js";
@@ -147,6 +149,7 @@ export const registerSessionsApi = (
     await docs.delete(roomId);
     deleteShareRow(db, roomId);
     deleteSnapshotsByRoom(db, roomId);
+    deleteChatMessagesByRoom(db, roomId);
     res.status(204).send();
   });
 
@@ -180,6 +183,32 @@ export const registerSessionsApi = (
       return;
     }
     res.json(snapshot);
+  });
+
+  app.get("/sessions/:roomId/chat", async (req, res) => {
+    const roomId = req.params.roomId;
+    const session = await sessions.getSession(roomId);
+    if (!session) {
+      res.status(404).json({ error: "session_not_found" });
+      return;
+    }
+    const roomPassword =
+      typeof req.query.roomPassword === "string" ? req.query.roomPassword : "";
+    if ((session.roomPassword ?? "") !== roomPassword) {
+      res.status(401).json({ error: "invalid_room_password" });
+      return;
+    }
+    const since =
+      typeof req.query.since === "string" && req.query.since.length > 0
+        ? req.query.since
+        : undefined;
+    const limitRaw = Number.parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
+    const messages = listRoomChatMessages(db, roomId, {
+      sinceCreatedAt: since,
+      limit
+    });
+    res.json({ messages });
   });
 
   app.post("/sessions/:roomId/validate", async (req, res) => {

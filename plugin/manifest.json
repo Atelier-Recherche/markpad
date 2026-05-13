@@ -5,5 +5,6 @@
   "minAppVersion": "1.6.0",
   "description": "Partage collaboratif temps réel des notes Obsidian.",
   "author": "Markpad",
-  "isDesktopOnly": false
+  "isDesktopOnly": false,
+  "styles": "styles.css"
 }

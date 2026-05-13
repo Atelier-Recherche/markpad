@@ -46,7 +46,9 @@
     "inlineCode": "Code inline",
     "link": "Insérer un lien",
     "horizontalRule": "Ligne horizontale",
-    "history": "Historique des modifications"
+    "history": "Historique des modifications",
+    "chat": "Discussion de la salle",
+    "kanban": "Kanban (.base)"
   },
   "history": {
     "title": "Historique",
@@ -59,6 +61,18 @@
   "toc": {
     "title": "Plan",
     "empty": "Aucun titre."
+  },
+  "chat": {
+    "title": "Discussion",
+    "empty": "Aucun message pour l’instant.",
+    "placeholder": "Écrire un message…",
+    "send": "Envoyer",
+    "connected": "Chat connecté",
+    "connecting": "Connexion au chat…",
+    "disconnected": "Chat déconnecté"
+  },
+  "kanban": {
+    "hint": "Glissez une carte vers une colonne pour mettre à jour le frontmatter (compatible Base Board / Obsidian Bases, filtre file.inFolder minimal)."
   },
   "language": {
     "label": "Langue"
@@ -160,9 +174,12 @@
     "emptyUsers": "Aucun utilisateur en base.",
     "badgeAdmin": "Admin",
     "badgeUser": "Utilisateur",
-    "settingsCardTitle": "Inscriptions",
+    "settingsCardTitle": "Inscriptions et chat",
     "allowPublicSignup": "Autoriser les nouveaux comptes (e-mail)",
     "allowPublicSignupHint": "Si désactivé, seuls les utilisateurs déjà en base peuvent recevoir un lien de connexion. Les nouvelles adresses sont refusées.",
-    "settingsSaveError": "Impossible d’enregistrer le réglage."
+    "settingsSaveError": "Impossible d’enregistrer le réglage.",
+    "chatRetentionLabel": "Durée de conservation des messages de chat (heures)",
+    "chatRetentionHint": "Les messages plus anciens sont supprimés automatiquement (toutes salles confondues, selon l’horodatage serveur).",
+    "chatRetentionSave": "Enregistrer"
   }
 }

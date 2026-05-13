@@ -47,6 +47,9 @@ export class MarkpadYjsServer {
   public start(): void {
     this.wss.on("connection", (ws, req) => {
       const currentUrl = new URL(req.url ?? "", "http://localhost");
+      if (currentUrl.pathname.startsWith("/ws/chat")) {
+        return;
+      }
       if (!currentUrl.pathname.startsWith("/ws/")) {
         ws.close();
         return;

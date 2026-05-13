@@ -9,10 +9,11 @@ import { registerSessionsApi } from "./api/sessions.js";
 import { SessionStore } from "./sessionStore.js";
 import { RedisDocStore } from "./persistence/redisDocStore.js";
 import { MarkpadYjsServer } from "./ws/yjsServer.js";
+import { MarkpadChatServer } from "./ws/chatServer.js";
 import { registerAuthApi } from "./api/auth.js";
 import { registerMeApi } from "./api/me.js";
 import { registerAdminApi } from "./api/admin.js";
-import { deleteShareRow, initDb, seedAllowPublicSignupIfMissing } from "./db/sqlite.js";
+import { deleteChatMessagesByRoom, deleteShareRow, deleteSnapshotsByRoom, initDb, seedAllowPublicSignupIfMissing, seedChatRetentionHoursIfMissing } from "./db/sqlite.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -33,6 +34,7 @@ const sessionStore = new SessionStore(redis);
 const docStore = new RedisDocStore(redis);
 const db = initDb();
 seedAllowPublicSignupIfMissing(db, config.allowPublicSignupDefault);
+seedChatRetentionHoursIfMissing(db, config.chatRetentionHoursDefault);
 
 void sessionStore.backfillActivityIndex().catch((err) => {
   console.error("Markpad: backfill activity index failed", err);
@@ -49,6 +51,8 @@ const runIdleCleanup = async (): Promise<void> => {
     await sessionStore.deleteSession(roomId);
     await docStore.delete(roomId);
     deleteShareRow(db, roomId);
+    deleteSnapshotsByRoom(db, roomId);
+    deleteChatMessagesByRoom(db, roomId);
     console.log(`Markpad: removed idle session ${roomId}`);
   }
 };
@@ -71,6 +75,7 @@ registerAdminApi(app, db, sessionStore, docStore);
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+new MarkpadChatServer(sessionStore, db).start(wss);
 new MarkpadYjsServer(wss, docStore, sessionStore, db).start();
 
 server.listen(config.port, config.host, () => {

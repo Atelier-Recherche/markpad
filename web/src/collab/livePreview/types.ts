@@ -3,6 +3,7 @@ export interface LivePreviewConfig {
   bold?: boolean;
   italic?: boolean;
   tables?: boolean;
+  taskLists?: boolean;
 }
 
 export const defaultLivePreviewConfig: Required<LivePreviewConfig> = {
@@ -10,4 +11,5 @@ export const defaultLivePreviewConfig: Required<LivePreviewConfig> = {
   bold: true,
   italic: true,
   tables: true,
+  taskLists: true,
 };

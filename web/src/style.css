@@ -397,6 +397,97 @@ body {
   min-height: 0;
 }
 
+.editor-shell--kanban {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-shell__kanban-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.base-kanban {
+  padding: 10px 12px 14px;
+}
+
+.base-kanban__hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  opacity: 0.78;
+  line-height: 1.45;
+}
+
+.base-kanban__board {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.base-kanban__column {
+  flex: 0 0 240px;
+  min-width: 200px;
+  max-width: 320px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 180px;
+  max-height: calc(100dvh - 360px);
+}
+
+.base-kanban__col-head {
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.base-kanban__cards {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.base-kanban__card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface-strong) 70%, transparent);
+  cursor: grab;
+}
+
+.base-kanban__card--drag {
+  opacity: 0.55;
+}
+
+.base-kanban__card-title {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.base-kanban__card-path {
+  display: block;
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 4px;
+  word-break: break-all;
+}
+
 .editor--yjs-mount-only {
   position: absolute !important;
   width: 1px !important;
@@ -508,6 +599,30 @@ body {
 /* ── Live Preview : tableau ── */
 .cm-md-table-header { font-weight: 700; }
 .cm-md-table-sep    { opacity: 0.35; }
+
+/* ── Live Preview : listes de tâches GFM ── */
+.cm-md-task-list-row {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.cm-md-task-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  border: 1px solid color-mix(in srgb, var(--text) 38%, transparent);
+  border-radius: 3px;
+  font-size: 0.72em;
+  line-height: 1;
+  color: color-mix(in srgb, var(--text) 85%, transparent);
+}
+.cm-md-task-checkbox--checked {
+  background: color-mix(in srgb, var(--button-bg) 35%, transparent);
+  border-color: color-mix(in srgb, var(--button-bg) 65%, transparent);
+}
 
 .preview {
   height: calc(100dvh - 300px);
@@ -667,6 +782,119 @@ body {
   -webkit-box-decoration-break: clone;
 }
 
+/* ── Panneau chat (salle) ── */
+.chat-panel {
+  height: calc(100dvh - 300px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.chat-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.chat-panel__status {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.chat-panel__messages {
+  list-style: none;
+  margin: 0;
+  padding: 10px 12px;
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-panel__empty {
+  opacity: 0.65;
+  font-size: 13px;
+}
+
+.chat-panel__msg {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface-strong) 55%, transparent);
+  border: 1px solid var(--border);
+}
+
+.chat-panel__msg-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.chat-panel__msg-meta time {
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.chat-panel__msg-body {
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-panel__composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.chat-panel__input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.chat-panel__send {
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--button-bg);
+  color: var(--button-fg, #fff);
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-panel__send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .toc-item {
   width: 100%;
   text-align: left;
@@ -701,6 +929,52 @@ body {
   background: var(--surface-strong);
   border-radius: 5px;
   padding: 2px 5px;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75em 0;
+  font-size: 0.95em;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: color-mix(in srgb, var(--surface-strong) 85%, transparent);
+  font-weight: 600;
+}
+
+.markdown-body tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-strong) 35%, transparent);
+}
+
+.markdown-body ul.contains-task-list,
+.markdown-body ol.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5em 0;
+}
+
+.markdown-body .contains-task-list li {
+  position: relative;
+  padding-left: 0.25rem;
+  margin: 0.25em 0;
+}
+
+.markdown-body .contains-task-list li input[type="checkbox"] {
+  margin-right: 0.45em;
+  vertical-align: middle;
+  accent-color: var(--button-bg);
+  pointer-events: none;
 }
 
 @media (max-width: 700px) {

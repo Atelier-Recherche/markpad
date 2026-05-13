@@ -54,6 +54,7 @@ export const AdminPanel = () => {
   const [error, setError] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [allowPublicSignup, setAllowPublicSignup] = useState<boolean | null>(null);
+  const [chatRetentionHours, setChatRetentionHours] = useState<number | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   useEffect(() => {
@@ -100,8 +101,13 @@ export const AdminPanel = () => {
     });
     if (res.status === 401 || res.status === 403) return;
     if (!res.ok) return;
-    const data = (await res.json()) as { allowPublicSignup?: boolean };
+    const data = (await res.json()) as { allowPublicSignup?: boolean; chatRetentionHours?: number };
     setAllowPublicSignup(data.allowPublicSignup !== false);
+    if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
+      setChatRetentionHours(data.chatRetentionHours);
+    } else {
+      setChatRetentionHours(24);
+    }
   }, []);
 
   const loadAll = useCallback(async () => {
@@ -172,8 +178,47 @@ export const AdminPanel = () => {
         setError(t("admin.settingsSaveError"));
         return;
       }
-      const data = (await res.json()) as { allowPublicSignup?: boolean };
+      const data = (await res.json()) as {
+        allowPublicSignup?: boolean;
+        chatRetentionHours?: number;
+      };
       setAllowPublicSignup(data.allowPublicSignup !== false);
+      if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
+        setChatRetentionHours(data.chatRetentionHours);
+      }
+    } catch {
+      setError(t("admin.settingsSaveError"));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const saveChatRetention = async () => {
+    const tk = readToken();
+    if (!tk || chatRetentionHours == null) return;
+    setSettingsSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`${httpBase()}/admin/settings`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${tk}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ chatRetentionHours })
+      });
+      if (!res.ok) {
+        setError(t("admin.settingsSaveError"));
+        return;
+      }
+      const data = (await res.json()) as {
+        allowPublicSignup?: boolean;
+        chatRetentionHours?: number;
+      };
+      setAllowPublicSignup(data.allowPublicSignup !== false);
+      if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
+        setChatRetentionHours(data.chatRetentionHours);
+      }
     } catch {
       setError(t("admin.settingsSaveError"));
     } finally {
@@ -259,7 +304,7 @@ export const AdminPanel = () => {
 
       {error ? <p className="join-error admin-error">{error}</p> : null}
 
-      {allowPublicSignup !== null ? (
+      {allowPublicSignup !== null && chatRetentionHours !== null ? (
         <section className="me-card" style={{ marginBottom: 16 }}>
           <h2 className="me-section-title">{t("admin.settingsCardTitle")}</h2>
           <label
@@ -282,6 +327,36 @@ export const AdminPanel = () => {
               <span className="me-muted">{t("admin.allowPublicSignupHint")}</span>
             </span>
           </label>
+          <div style={{ marginTop: 18 }}>
+            <label className="me-muted" style={{ display: "block", marginBottom: 6 }}>
+              {t("admin.chatRetentionLabel")}
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <input
+                type="number"
+                min={1}
+                max={8760}
+                value={chatRetentionHours}
+                disabled={settingsSaving}
+                onChange={(e) => {
+                  const v = Number.parseInt(e.target.value, 10);
+                  setChatRetentionHours(Number.isFinite(v) ? v : 24);
+                }}
+                style={{ width: 100 }}
+              />
+              <button
+                type="button"
+                className="me-btn-secondary"
+                disabled={settingsSaving}
+                onClick={() => void saveChatRetention()}
+              >
+                {t("admin.chatRetentionSave")}
+              </button>
+            </div>
+            <p className="me-muted" style={{ marginTop: 8, fontSize: 13 }}>
+              {t("admin.chatRetentionHint")}
+            </p>
+          </div>
         </section>
       ) : null}
 

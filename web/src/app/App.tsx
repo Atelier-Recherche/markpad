@@ -26,7 +26,9 @@ import {
   WifiOff,
   Hash,
   Languages,
-  FolderTree
+  FolderTree,
+  MessageSquare,
+  LayoutGrid
 } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { createCollabEditor, type CollabRuntime } from "../collab/editor";
@@ -34,6 +36,9 @@ import { getFrontmatterPrefixLength } from "../collab/frontmatter";
 import { SUPPORTED_LOCALES, setLocale, type SupportedLocale } from "../i18n/index";
 import { FileTreePanel } from "./FileTreePanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { RoomChatPanel } from "./RoomChatPanel";
+import { BaseKanbanBoard } from "./BaseKanbanBoard";
+import { parseBaseKanban } from "../base/parseBaseFile";
 
 const DISPLAY_NAME_KEY = "markpad-display-name";
 const UI_ONBOARDING_KEY = "markpad-ui-onboarding";
@@ -47,7 +52,7 @@ const hasCompletedUiOnboarding = (): boolean => {
 };
 
 type ConnectionStatus = "connected" | "offline";
-type ViewMode = "edit" | "preview" | "split";
+type ViewMode = "edit" | "preview" | "split" | "kanban";
 type ThemeMode = "dark" | "light";
 type TocItem = { id: string; level: number; text: string };
 type JoinGate = "checking" | "open" | "password" | "missing" | "error";
@@ -87,7 +92,7 @@ export const App = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (!hasCompletedUiOnboarding()) return "edit";
     const s = localStorage.getItem("markpad-view-mode");
-    if (s === "edit" || s === "preview" || s === "split") return s;
+    if (s === "edit" || s === "preview" || s === "split" || s === "kanban") return s;
     return "split";
   });
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -101,6 +106,10 @@ export const App = () => {
   const [historyOpen, setHistoryOpen] = useState(() => {
     if (!hasCompletedUiOnboarding()) return false;
     return localStorage.getItem("markpad-history-open") === "true";
+  });
+  const [chatOpen, setChatOpen] = useState(() => {
+    if (!hasCompletedUiOnboarding()) return false;
+    return localStorage.getItem("markpad-chat-open") === "true";
   });
   const [treeOpen, setTreeOpen] = useState(() => {
     if (!hasCompletedUiOnboarding()) return false;
@@ -137,6 +146,27 @@ export const App = () => {
     const raw = import.meta.env.VITE_SERVER_BASE_URL ?? "http://localhost:1234";
     return String(raw).replace(/\/$/, "");
   }, []);
+
+  const parsedBaseBoard = useMemo(() => {
+    if (!folderMode || !activeFilePath?.toLowerCase().endsWith(".base")) return null;
+    return parseBaseKanban(markdown);
+  }, [folderMode, activeFilePath, markdown]);
+
+  useEffect(() => {
+    if (viewMode === "kanban" && !parsedBaseBoard) {
+      setViewMode("split");
+    }
+  }, [viewMode, parsedBaseBoard]);
+
+  useEffect(() => {
+    if (
+      viewMode === "kanban" &&
+      activeFilePath &&
+      !activeFilePath.toLowerCase().endsWith(".base")
+    ) {
+      setViewMode("split");
+    }
+  }, [activeFilePath, viewMode]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -213,6 +243,10 @@ export const App = () => {
   }, [historyOpen]);
 
   useEffect(() => {
+    localStorage.setItem("markpad-chat-open", chatOpen ? "true" : "false");
+  }, [chatOpen]);
+
+  useEffect(() => {
     localStorage.setItem("markpad-tree-open", treeOpen ? "true" : "false");
   }, [treeOpen]);
 
@@ -266,7 +300,8 @@ export const App = () => {
     hideFrontmatter,
     showLineNumbers,
     displayName,
-    editorMountSurface
+    editorMountSurface,
+    viewMode
   ]);
 
   useEffect(() => {
@@ -315,6 +350,15 @@ export const App = () => {
     }
 
     const renderer = new marked.Renderer();
+    const baseList = renderer.list.bind(renderer);
+    renderer.list = function (token) {
+      const html = baseList(token);
+      const hasTask = token.items.some((item) => item.task);
+      if (hasTask && !token.ordered) {
+        return html.replace("<ul>", '<ul class="contains-task-list">');
+      }
+      return html;
+    };
     renderer.heading = function ({ tokens, depth }) {
       const plain = (tokens as Array<{ raw?: string; text?: string }>)
         .map((t) => (t.raw ?? t.text ?? ""))
@@ -326,7 +370,11 @@ export const App = () => {
     };
     let html = "";
     try {
-      html = marked.parse(body, { async: false, renderer }) as string;
+      html = marked.parse(body, {
+        async: false,
+        gfm: true,
+        renderer
+      }) as string;
     } catch {
       const escaped = body
         .replaceAll("&", "&amp;")
@@ -530,6 +578,18 @@ export const App = () => {
               >
                 <Columns2 size={18} strokeWidth={2} />
               </button>
+              {folderMode && parsedBaseBoard ? (
+                <button
+                  type="button"
+                  className={iconBtnClass(viewMode === "kanban")}
+                  title={t("toolbar.kanban")}
+                  aria-label={t("toolbar.kanban")}
+                  aria-pressed={viewMode === "kanban"}
+                  onClick={() => setViewMode("kanban")}
+                >
+                  <LayoutGrid size={18} strokeWidth={2} />
+                </button>
+              ) : null}
             </div>
             <div className="obsidian-toolbar__sep" aria-hidden />
             <div className="obsidian-toolbar__group">
@@ -564,6 +624,16 @@ export const App = () => {
                 onClick={() => setHistoryOpen((v) => !v)}
               >
                 <Clock size={18} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                className={iconBtnClass(chatOpen)}
+                title={t("toolbar.chat")}
+                aria-label={t("toolbar.chat")}
+                aria-pressed={chatOpen}
+                onClick={() => setChatOpen((v) => !v)}
+              >
+                <MessageSquare size={18} strokeWidth={2} />
               </button>
               <button
                 type="button"
@@ -722,7 +792,7 @@ export const App = () => {
         <Group
           orientation="horizontal"
           id="markpad-outer"
-          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${historyOpen ? "" : " workspace--no-history"}${folderMode ? " workspace--folder" : ""}${folderMode && !treeOpen ? " workspace--no-tree" : ""}`}
+          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${historyOpen ? "" : " workspace--no-history"}${chatOpen ? "" : " workspace--no-chat"}${folderMode ? " workspace--folder" : ""}${folderMode && !treeOpen ? " workspace--no-tree" : ""}`}
         >
           {folderMode && treeOpen && folderPaths.length > 0 ? (
             <>
@@ -754,9 +824,24 @@ export const App = () => {
             maxSize="96%"
           >
             <section
-              className={`editor-shell ${showEditor && showPreview ? "editor-shell--fill" : ""}${!showEditor && showPreview ? " editor-shell--preview-only" : ""}`}
+              className={`editor-shell ${showEditor && showPreview ? "editor-shell--fill" : ""}${!showEditor && showPreview ? " editor-shell--preview-only" : ""}${viewMode === "kanban" ? " editor-shell--kanban" : ""}`}
             >
-              {showEditor ? (
+              {viewMode === "kanban" && parsedBaseBoard && runtime ? (
+                <>
+                  <div
+                    ref={mountRef}
+                    className="editor editor--yjs-mount-only"
+                    aria-hidden
+                  />
+                  <div className="editor-shell__kanban-wrap">
+                    <BaseKanbanBoard
+                      ydoc={runtime.doc}
+                      folderPaths={folderPaths}
+                      parsed={parsedBaseBoard}
+                    />
+                  </div>
+                </>
+              ) : showEditor ? (
                 <Group orientation="horizontal" id="markpad-editor-layout">
                   <Panel
                     id="editor"
@@ -847,6 +932,28 @@ export const App = () => {
                   folderMode={folderMode}
                   activeFilePath={activeFilePath}
                   currentContent={markdown}
+                />
+              </Panel>
+            </>
+          ) : null}
+
+          {chatOpen ? (
+            <>
+              <Separator className="resize-handle" />
+              <Panel
+                id="chat"
+                defaultSize="26%"
+                minSize="12%"
+                maxSize="92%"
+                className="workspace-panel"
+              >
+                <RoomChatPanel
+                  roomId={roomId}
+                  roomPassword={password}
+                  httpBaseUrl={httpBaseUrl}
+                  wsBaseUrl={wsBaseUrl}
+                  userId={stableUserId}
+                  displayName={displayName}
                 />
               </Panel>
             </>

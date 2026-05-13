@@ -45,6 +45,15 @@ export function initDb(): Database.Database {
       snapshot_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_history_room ON document_history(room_id, file_path, snapshot_at);
+    CREATE TABLE IF NOT EXISTS room_chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id TEXT NOT NULL,
+      sender_client_id TEXT NOT NULL,
+      sender_display_name TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_room_time ON room_chat_messages(room_id, created_at);
   `);
   return db;
 }
@@ -207,6 +216,115 @@ export function getSnapshotContent(
 
 export function deleteSnapshotsByRoom(db: Database.Database, roomId: string): void {
   db.prepare(`DELETE FROM document_history WHERE room_id = ?`).run(roomId);
+}
+
+export function deleteChatMessagesByRoom(db: Database.Database, roomId: string): void {
+  db.prepare(`DELETE FROM room_chat_messages WHERE room_id = ?`).run(roomId);
+}
+
+const CHAT_RETENTION_HOURS_KEY = "chat_retention_hours";
+
+export function seedChatRetentionHoursIfMissing(db: Database.Database, hours: number): void {
+  db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)`).run(
+    CHAT_RETENTION_HOURS_KEY,
+    String(Math.max(1, Math.floor(hours)))
+  );
+}
+
+export function getChatRetentionHours(db: Database.Database): number {
+  const row = db
+    .prepare(`SELECT value FROM app_settings WHERE key = ?`)
+    .get(CHAT_RETENTION_HOURS_KEY) as { value: string } | undefined;
+  if (!row) return 24;
+  const n = Number.parseInt(row.value, 10);
+  return Number.isFinite(n) && n >= 1 ? n : 24;
+}
+
+export function setChatRetentionHours(db: Database.Database, hours: number): void {
+  const h = Math.max(1, Math.floor(hours));
+  db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)`).run(
+    CHAT_RETENTION_HOURS_KEY,
+    String(h)
+  );
+}
+
+export type ChatMessageRow = {
+  id: number;
+  room_id: string;
+  sender_client_id: string;
+  sender_display_name: string;
+  body: string;
+  created_at: string;
+};
+
+export function insertRoomChatMessage(
+  db: Database.Database,
+  row: {
+    room_id: string;
+    sender_client_id: string;
+    sender_display_name: string;
+    body: string;
+  }
+): ChatMessageRow {
+  const createdAt = new Date().toISOString();
+  const info = db
+    .prepare(
+      `INSERT INTO room_chat_messages (room_id, sender_client_id, sender_display_name, body, created_at)
+       VALUES (@room_id, @sender_client_id, @sender_display_name, @body, @created_at)`
+    )
+    .run({
+      room_id: row.room_id,
+      sender_client_id: row.sender_client_id,
+      sender_display_name: row.sender_display_name,
+      body: row.body,
+      created_at: createdAt
+    });
+  const id = Number(info.lastInsertRowid);
+  return {
+    id,
+    room_id: row.room_id,
+    sender_client_id: row.sender_client_id,
+    sender_display_name: row.sender_display_name,
+    body: row.body,
+    created_at: createdAt
+  };
+}
+
+export function listRoomChatMessages(
+  db: Database.Database,
+  roomId: string,
+  options?: { sinceCreatedAt?: string; limit?: number }
+): ChatMessageRow[] {
+  const limit = Math.min(Math.max(options?.limit ?? 500, 1), 2000);
+  if (options?.sinceCreatedAt) {
+    return db
+      .prepare(
+        `SELECT id, room_id, sender_client_id, sender_display_name, body, created_at
+         FROM room_chat_messages
+         WHERE room_id = ? AND created_at > ?
+         ORDER BY created_at ASC
+         LIMIT ?`
+      )
+      .all(roomId, options.sinceCreatedAt, limit) as ChatMessageRow[];
+  }
+  const rows = db
+    .prepare(
+      `SELECT id, room_id, sender_client_id, sender_display_name, body, created_at
+       FROM room_chat_messages
+       WHERE room_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(roomId, limit) as ChatMessageRow[];
+  return rows.slice().reverse();
+}
+
+/** Supprime les messages plus anciens que la fenêtre de rétention (horloge serveur). */
+export function pruneRoomChatMessagesOlderThan(db: Database.Database, retentionHours: number): number {
+  const h = Math.max(1, Math.floor(retentionHours));
+  const cutoff = new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+  const info = db.prepare(`DELETE FROM room_chat_messages WHERE created_at < ?`).run(cutoff);
+  return info.changes;
 }
 
 export function listAllShares(db: Database.Database) {

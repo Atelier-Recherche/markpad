@@ -46,7 +46,9 @@
     "inlineCode": "Inline-Code",
     "link": "Link einfügen",
     "horizontalRule": "Horizontale Linie",
-    "history": "Änderungsverlauf"
+    "history": "Änderungsverlauf",
+    "chat": "Raum-Chat",
+    "kanban": "Kanban (.base)"
   },
   "history": {
     "title": "Verlauf",
@@ -59,6 +61,18 @@
   "toc": {
     "title": "Gliederung",
     "empty": "Keine Überschriften."
+  },
+  "chat": {
+    "title": "Chat",
+    "empty": "Noch keine Nachrichten.",
+    "placeholder": "Nachricht schreiben…",
+    "send": "Senden",
+    "connected": "Chat verbunden",
+    "connecting": "Chat wird verbunden…",
+    "disconnected": "Chat getrennt"
+  },
+  "kanban": {
+    "hint": "Karte auf eine Spalte ziehen, um das Frontmatter anzupassen (Base Board / Obsidian Bases, minimale file.inFolder-Unterstützung)."
   },
   "language": {
     "label": "Sprache"
@@ -160,9 +174,12 @@
     "emptyUsers": "Keine Benutzer in der Datenbank.",
     "badgeAdmin": "Admin",
     "badgeUser": "Benutzer",
-    "settingsCardTitle": "Registrierungen",
+    "settingsCardTitle": "Registrierungen & Chat",
     "allowPublicSignup": "Neue Konten erlauben (E-Mail)",
     "allowPublicSignupHint": "Wenn aus, erhalten nur bereits bekannte E-Mail-Adressen einen Anmeldelink. Neue Adressen werden abgelehnt.",
-    "settingsSaveError": "Einstellung konnte nicht gespeichert werden."
+    "settingsSaveError": "Einstellung konnte nicht gespeichert werden.",
+    "chatRetentionLabel": "Aufbewahrung von Chat-Nachrichten (Stunden)",
+    "chatRetentionHint": "Ältere Nachrichten werden automatisch gelöscht (serverseitig nach Zeitstempel).",
+    "chatRetentionSave": "Speichern"
   }
 }

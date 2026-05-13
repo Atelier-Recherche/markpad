@@ -46,7 +46,9 @@
     "inlineCode": "Inline code",
     "link": "Insert link",
     "horizontalRule": "Horizontal rule",
-    "history": "Modification history"
+    "history": "Modification history",
+    "chat": "Room chat",
+    "kanban": "Kanban (.base)"
   },
   "history": {
     "title": "History",
@@ -59,6 +61,18 @@
   "toc": {
     "title": "Outline",
     "empty": "No headings."
+  },
+  "chat": {
+    "title": "Chat",
+    "empty": "No messages yet.",
+    "placeholder": "Write a message…",
+    "send": "Send",
+    "connected": "Chat connected",
+    "connecting": "Connecting to chat…",
+    "disconnected": "Chat disconnected"
+  },
+  "kanban": {
+    "hint": "Drag a card onto a column to update frontmatter (Base Board / Obsidian Bases; minimal file.inFolder filter support)."
   },
   "language": {
     "label": "Language"
@@ -160,9 +174,12 @@
     "emptyUsers": "No users in the database.",
     "badgeAdmin": "Admin",
     "badgeUser": "User",
-    "settingsCardTitle": "Registrations",
+    "settingsCardTitle": "Registrations & chat",
     "allowPublicSignup": "Allow new accounts (email)",
     "allowPublicSignupHint": "When off, only emails already in the database can receive a sign-in link. New addresses are rejected.",
-    "settingsSaveError": "Could not save this setting."
+    "settingsSaveError": "Could not save this setting.",
+    "chatRetentionLabel": "Room chat message retention (hours)",
+    "chatRetentionHint": "Messages older than this are deleted automatically (server-wide, by server timestamp).",
+    "chatRetentionSave": "Save"
   }
 }

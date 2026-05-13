@@ -83,7 +83,8 @@ export const config = {
   smtpTlsRejectUnauthorized: parseBoolOrUndef(process.env.SMTP_TLS_REJECT_UNAUTHORIZED) ?? true,
   /** Valeur initiale en base (`app_settings`) si la clé n’existe pas encore. Les admins peuvent changer via l’API admin. */
   allowPublicSignupDefault:
-    parseBoolOrUndef(process.env.ALLOW_PUBLIC_SIGNUP) !== false
+    parseBoolOrUndef(process.env.ALLOW_PUBLIC_SIGNUP) !== false,
+  chatRetentionHoursDefault: parseIntOr(process.env.CHAT_RETENTION_HOURS_DEFAULT, 24)
 };
 
 if (config.allowedApiKeys.length === 0) {

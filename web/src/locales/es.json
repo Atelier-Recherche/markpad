@@ -46,7 +46,9 @@
     "inlineCode": "Código en línea",
     "link": "Insertar enlace",
     "horizontalRule": "Línea horizontal",
-    "history": "Historial de modificaciones"
+    "history": "Historial de modificaciones",
+    "chat": "Chat de la sala",
+    "kanban": "Kanban (.base)"
   },
   "history": {
     "title": "Historial",
@@ -59,6 +61,18 @@
   "toc": {
     "title": "Esquema",
     "empty": "Sin encabezados."
+  },
+  "chat": {
+    "title": "Chat",
+    "empty": "Aún no hay mensajes.",
+    "placeholder": "Escribe un mensaje…",
+    "send": "Enviar",
+    "connected": "Chat conectado",
+    "connecting": "Conectando al chat…",
+    "disconnected": "Chat desconectado"
+  },
+  "kanban": {
+    "hint": "Arrastra una tarjeta a una columna para actualizar el frontmatter (Base Board / Obsidian Bases; soporte mínimo de file.inFolder)."
   },
   "language": {
     "label": "Idioma"
@@ -160,9 +174,12 @@
     "emptyUsers": "No hay usuarios en la base de datos.",
     "badgeAdmin": "Admin",
     "badgeUser": "Usuario",
-    "settingsCardTitle": "Registros",
+    "settingsCardTitle": "Registros y chat",
     "allowPublicSignup": "Permitir nuevas cuentas (correo)",
     "allowPublicSignupHint": "Si está desactivado, solo los correos ya dados de alta pueden recibir un enlace. Las direcciones nuevas se rechazan.",
-    "settingsSaveError": "No se pudo guardar el ajuste."
+    "settingsSaveError": "No se pudo guardar el ajuste.",
+    "chatRetentionLabel": "Retención de mensajes del chat (horas)",
+    "chatRetentionHint": "Los mensajes más antiguos se eliminan automáticamente (según la hora del servidor).",
+    "chatRetentionSave": "Guardar"
   }
 }
