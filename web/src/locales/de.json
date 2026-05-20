@@ -180,6 +180,16 @@
     "settingsSaveError": "Einstellung konnte nicht gespeichert werden.",
     "chatRetentionLabel": "Aufbewahrung von Chat-Nachrichten (Stunden)",
     "chatRetentionHint": "Ältere Nachrichten werden automatisch gelöscht (serverseitig nach Zeitstempel).",
-    "chatRetentionSave": "Speichern"
+    "chatRetentionSave": "Speichern",
+    "featuresCardTitle": "Module der geteilten Oberfläche",
+    "featuresHint": "Gilt für alle, die /share/...-Links öffnen; Werte werden beim Laden gelesen.",
+    "featureKanban": "Kanban (.base-Dateien)",
+    "featureKanbanHint": "Spaltenboard für Obsidian Bases (Tabellen-/Kanban-Ansicht mit groupBy auf einer Notiz-Eigenschaft).",
+    "featureChat": "Raum-Chat",
+    "featureChatHint": "Seitenleiste und WebSocket; REST liefert 403, wenn deaktiviert.",
+    "featureHistory": "Versionsverlauf",
+    "featureHistoryHint": "Snapshots und Diff; REST liefert 403, wenn deaktiviert.",
+    "featureFolderTree": "Dateibaum (Ordner-Freigaben)",
+    "featureFolderTreeHint": "Leiste zum Durchsuchen der Pfade; Inhalt synchronisiert sich auch ohne Baum."
   }
 }

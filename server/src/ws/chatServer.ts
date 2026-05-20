@@ -3,6 +3,7 @@ import type { WebSocket, WebSocketServer } from "ws";
 import type Database from "better-sqlite3";
 import {
   getChatRetentionHours,
+  getMarkpadFeatureFlags,
   insertRoomChatMessage,
   pruneRoomChatMessagesOlderThan,
   type ChatMessageRow
@@ -56,6 +57,11 @@ export class MarkpadChatServer {
     }
     if ((session.roomPassword ?? "") !== password) {
       ws.close();
+      return;
+    }
+
+    if (!getMarkpadFeatureFlags(this.db).chat) {
+      ws.close(1008, "chat_disabled");
       return;
     }
 

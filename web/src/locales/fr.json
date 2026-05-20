@@ -180,6 +180,16 @@
     "settingsSaveError": "Impossible d’enregistrer le réglage.",
     "chatRetentionLabel": "Durée de conservation des messages de chat (heures)",
     "chatRetentionHint": "Les messages plus anciens sont supprimés automatiquement (toutes salles confondues, selon l’horodatage serveur).",
-    "chatRetentionSave": "Enregistrer"
+    "chatRetentionSave": "Enregistrer",
+    "featuresCardTitle": "Modules interface (salles partagées)",
+    "featuresHint": "Ces options s’appliquent à tous les visiteurs des liens /share/... Elles sont lues au chargement de la page.",
+    "featureKanban": "Vue Kanban (fichiers .base)",
+    "featureKanbanHint": "Grille par colonnes pour les bases Obsidian (vues table / kanban avec groupBy sur une propriété note).",
+    "featureChat": "Chat de salle",
+    "featureChatHint": "Panneau latéral et WebSocket messagerie ; l’API historique renvoie 403 si désactivé.",
+    "featureHistory": "Historique des versions",
+    "featureHistoryHint": "Snapshots et comparaison ; les endpoints REST renvoient 403 si désactivé.",
+    "featureFolderTree": "Arborescence fichier (partage dossier)",
+    "featureFolderTreeHint": "Bandeau pour parcourir les chemins du partage « dossier » ; sans cela le contenu reste synchronisé mais sans arbre."
   }
 }

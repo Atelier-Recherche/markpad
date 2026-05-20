@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { MarkpadPublicFeatures } from "../hooks/useMarkpadPublicConfig";
 
 const httpBase = () =>
   String(import.meta.env.VITE_SERVER_BASE_URL ?? "http://localhost:1234").replace(/\/$/, "");
@@ -44,6 +45,13 @@ type AdminUser = {
 
 type Tab = "shares" | "users";
 
+const defaultFeaturesState: MarkpadPublicFeatures = {
+  kanban: true,
+  chat: true,
+  history: true,
+  folderTree: true
+};
+
 export const AdminPanel = () => {
   const { t } = useTranslation();
   const [token, setToken] = useState<string | null>(() => readToken());
@@ -56,6 +64,7 @@ export const AdminPanel = () => {
   const [allowPublicSignup, setAllowPublicSignup] = useState<boolean | null>(null);
   const [chatRetentionHours, setChatRetentionHours] = useState<number | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [features, setFeatures] = useState<MarkpadPublicFeatures>(defaultFeaturesState);
 
   useEffect(() => {
     const sync = () => setToken(readToken());
@@ -101,12 +110,19 @@ export const AdminPanel = () => {
     });
     if (res.status === 401 || res.status === 403) return;
     if (!res.ok) return;
-    const data = (await res.json()) as { allowPublicSignup?: boolean; chatRetentionHours?: number };
+    const data = (await res.json()) as {
+      allowPublicSignup?: boolean;
+      chatRetentionHours?: number;
+      features?: Partial<MarkpadPublicFeatures>;
+    };
     setAllowPublicSignup(data.allowPublicSignup !== false);
     if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
       setChatRetentionHours(data.chatRetentionHours);
     } else {
       setChatRetentionHours(24);
+    }
+    if (data.features && typeof data.features === "object") {
+      setFeatures((prev) => ({ ...prev, ...data.features }));
     }
   }, []);
 
@@ -181,10 +197,14 @@ export const AdminPanel = () => {
       const data = (await res.json()) as {
         allowPublicSignup?: boolean;
         chatRetentionHours?: number;
+        features?: Partial<MarkpadPublicFeatures>;
       };
       setAllowPublicSignup(data.allowPublicSignup !== false);
       if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
         setChatRetentionHours(data.chatRetentionHours);
+      }
+      if (data.features && typeof data.features === "object") {
+        setFeatures((prev) => ({ ...prev, ...data.features }));
       }
     } catch {
       setError(t("admin.settingsSaveError"));
@@ -214,10 +234,51 @@ export const AdminPanel = () => {
       const data = (await res.json()) as {
         allowPublicSignup?: boolean;
         chatRetentionHours?: number;
+        features?: Partial<MarkpadPublicFeatures>;
       };
       setAllowPublicSignup(data.allowPublicSignup !== false);
       if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
         setChatRetentionHours(data.chatRetentionHours);
+      }
+      if (data.features && typeof data.features === "object") {
+        setFeatures((prev) => ({ ...prev, ...data.features }));
+      }
+    } catch {
+      setError(t("admin.settingsSaveError"));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const saveModuleFeature = async <K extends keyof MarkpadPublicFeatures>(key: K, value: boolean) => {
+    const tk = readToken();
+    if (!tk) return;
+    setSettingsSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`${httpBase()}/admin/settings`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${tk}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ features: { [key]: value } })
+      });
+      if (!res.ok) {
+        setError(t("admin.settingsSaveError"));
+        return;
+      }
+      const data = (await res.json()) as {
+        allowPublicSignup?: boolean;
+        chatRetentionHours?: number;
+        features?: Partial<MarkpadPublicFeatures>;
+      };
+      setAllowPublicSignup(data.allowPublicSignup !== false);
+      if (typeof data.chatRetentionHours === "number" && Number.isFinite(data.chatRetentionHours)) {
+        setChatRetentionHours(data.chatRetentionHours);
+      }
+      if (data.features && typeof data.features === "object") {
+        setFeatures((prev) => ({ ...prev, ...data.features }));
       }
     } catch {
       setError(t("admin.settingsSaveError"));
@@ -356,6 +417,51 @@ export const AdminPanel = () => {
             <p className="me-muted" style={{ marginTop: 8, fontSize: 13 }}>
               {t("admin.chatRetentionHint")}
             </p>
+          </div>
+          <div
+            style={{
+              marginTop: 22,
+              borderTop: "1px solid color-mix(in srgb, var(--text) 12%, transparent)",
+              paddingTop: 18
+            }}
+          >
+            <h3 className="me-section-title" style={{ fontSize: "1.05rem", marginBottom: 12 }}>
+              {t("admin.featuresCardTitle")}
+            </h3>
+            <p className="me-muted" style={{ marginBottom: 14, fontSize: 13 }}>
+              {t("admin.featuresHint")}
+            </p>
+            {(
+              [
+                ["kanban", "featureKanban", "featureKanbanHint"],
+                ["chat", "featureChat", "featureChatHint"],
+                ["history", "featureHistory", "featureHistoryHint"],
+                ["folderTree", "featureFolderTree", "featureFolderTreeHint"]
+              ] as const
+            ).map(([key, labelKey, hintKey]) => (
+              <label
+                key={key}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  marginBottom: 12,
+                  cursor: settingsSaving ? "wait" : "pointer"
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={features[key]}
+                  disabled={settingsSaving}
+                  onChange={(e) => void saveModuleFeature(key, e.target.checked)}
+                />
+                <span>
+                  <strong>{t(`admin.${labelKey}`)}</strong>
+                  <br />
+                  <span className="me-muted">{t(`admin.${hintKey}`)}</span>
+                </span>
+              </label>
+            ))}
           </div>
         </section>
       ) : null}

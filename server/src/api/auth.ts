@@ -4,7 +4,7 @@ import type Database from "better-sqlite3";
 import * as jose from "jose";
 import nodemailer from "nodemailer";
 import { config } from "../config.js";
-import { getAllowPublicSignup } from "../db/sqlite.js";
+import { getAllowPublicSignup, getMarkpadFeatureFlags } from "../db/sqlite.js";
 
 const TOKEN_BYTES = 24;
 const TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -172,6 +172,9 @@ export const registerAuthApi = (app: Express, db: Database.Database): void => {
   });
 
   app.get("/auth/public-config", (_req, res) => {
-    res.json({ allowPublicSignup: getAllowPublicSignup(db) });
+    res.json({
+      allowPublicSignup: getAllowPublicSignup(db),
+      features: getMarkpadFeatureFlags(db)
+    });
   });
 };

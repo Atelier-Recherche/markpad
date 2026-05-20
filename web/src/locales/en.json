@@ -180,6 +180,16 @@
     "settingsSaveError": "Could not save this setting.",
     "chatRetentionLabel": "Room chat message retention (hours)",
     "chatRetentionHint": "Messages older than this are deleted automatically (server-wide, by server timestamp).",
-    "chatRetentionSave": "Save"
+    "chatRetentionSave": "Save",
+    "featuresCardTitle": "Shared room UI modules",
+    "featuresHint": "These apply to everyone opening /share/... links; values are read when the page loads.",
+    "featureKanban": "Kanban view (.base files)",
+    "featureKanbanHint": "Column board for Obsidian Bases (table/kanban views with groupBy on a note property).",
+    "featureChat": "Room chat",
+    "featureChatHint": "Side panel and messaging WebSocket; REST returns 403 when disabled.",
+    "featureHistory": "Version history",
+    "featureHistoryHint": "Snapshots and diff; REST endpoints return 403 when disabled.",
+    "featureFolderTree": "File tree (folder shares)",
+    "featureFolderTreeHint": "Sidebar to browse paths in folder shares; content still syncs without the tree."
   }
 }

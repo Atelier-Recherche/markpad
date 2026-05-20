@@ -1,0 +1,41 @@
+# Publication GitHub Release du plugin Obsidian (tag semver sans préfixe v, ex. 1.2.3).
+# Déclenché après .\Release-Plugin.ps1 qui committe les artefacts et pousse le tag.
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies (racine + workspace plugin uniquement)
+        run: npm ci --include-workspace-root -w @markpad/plugin
+
+      - name: Build plugin
+        run: npm run build -w @markpad/plugin
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          body_path: markpad-plugin-release-notes.md
+          files: |
+            plugin/main.js
+            plugin/manifest.json
+            plugin/styles.css
+            plugin/versions.json

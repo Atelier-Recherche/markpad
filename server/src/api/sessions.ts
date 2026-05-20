@@ -8,6 +8,7 @@ import {
   deleteChatMessagesByRoom,
   deleteShareRow,
   deleteSnapshotsByRoom,
+  getMarkpadFeatureFlags,
   getSnapshotContent,
   insertShareRow,
   listRoomChatMessages,
@@ -154,6 +155,10 @@ export const registerSessionsApi = (
   });
 
   app.get("/sessions/:roomId/history", async (req, res) => {
+    if (!getMarkpadFeatureFlags(db).history) {
+      res.status(403).json({ error: "history_disabled" });
+      return;
+    }
     const roomId = req.params.roomId;
     const session = await sessions.getSession(roomId);
     if (!session) {
@@ -166,6 +171,10 @@ export const registerSessionsApi = (
   });
 
   app.get("/sessions/:roomId/history/:snapshotId", async (req, res) => {
+    if (!getMarkpadFeatureFlags(db).history) {
+      res.status(403).json({ error: "history_disabled" });
+      return;
+    }
     const roomId = req.params.roomId;
     const snapshotId = parseInt(req.params.snapshotId, 10);
     if (isNaN(snapshotId)) {
@@ -186,6 +195,10 @@ export const registerSessionsApi = (
   });
 
   app.get("/sessions/:roomId/chat", async (req, res) => {
+    if (!getMarkpadFeatureFlags(db).chat) {
+      res.status(403).json({ error: "chat_disabled" });
+      return;
+    }
     const roomId = req.params.roomId;
     const session = await sessions.getSession(roomId);
     if (!session) {

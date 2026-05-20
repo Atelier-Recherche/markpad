@@ -13,7 +13,15 @@ import { MarkpadChatServer } from "./ws/chatServer.js";
 import { registerAuthApi } from "./api/auth.js";
 import { registerMeApi } from "./api/me.js";
 import { registerAdminApi } from "./api/admin.js";
-import { deleteChatMessagesByRoom, deleteShareRow, deleteSnapshotsByRoom, initDb, seedAllowPublicSignupIfMissing, seedChatRetentionHoursIfMissing } from "./db/sqlite.js";
+import {
+  deleteChatMessagesByRoom,
+  deleteShareRow,
+  deleteSnapshotsByRoom,
+  initDb,
+  seedAllowPublicSignupIfMissing,
+  seedChatRetentionHoursIfMissing,
+  seedMarkpadFeatureFlagsIfMissing
+} from "./db/sqlite.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -35,6 +43,7 @@ const docStore = new RedisDocStore(redis);
 const db = initDb();
 seedAllowPublicSignupIfMissing(db, config.allowPublicSignupDefault);
 seedChatRetentionHoursIfMissing(db, config.chatRetentionHoursDefault);
+seedMarkpadFeatureFlagsIfMissing(db);
 
 void sessionStore.backfillActivityIndex().catch((err) => {
   console.error("Markpad: backfill activity index failed", err);

@@ -180,6 +180,16 @@
     "settingsSaveError": "No se pudo guardar el ajuste.",
     "chatRetentionLabel": "Retención de mensajes del chat (horas)",
     "chatRetentionHint": "Los mensajes más antiguos se eliminan automáticamente (según la hora del servidor).",
-    "chatRetentionSave": "Guardar"
+    "chatRetentionSave": "Guardar",
+    "featuresCardTitle": "Módulos de la interfaz (salas)",
+    "featuresHint": "Se aplican a quien abra enlaces /share/...; se leen al cargar la página.",
+    "featureKanban": "Vista Kanban (archivos .base)",
+    "featureKanbanHint": "Tablero por columnas para Bases de Obsidian (vistas tabla/kanban con groupBy sobre una propiedad).",
+    "featureChat": "Chat de sala",
+    "featureChatHint": "Panel lateral y WebSocket; la API devuelve 403 si está desactivado.",
+    "featureHistory": "Historial de versiones",
+    "featureHistoryHint": "Snapshots y diff; la API devuelve 403 si está desactivado.",
+    "featureFolderTree": "Árbol de archivos (carpeta compartida)",
+    "featureFolderTreeHint": "Barra lateral para recorrer rutas del modo carpeta; el contenido sigue sincronizado sin el árbol."
   }
 }

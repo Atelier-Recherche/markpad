@@ -352,3 +352,56 @@ export function listUsers(db: Database.Database) {
     created_at: string;
   }>;
 }
+
+/** Fonctionnalités UI / modules activables par l’admin (JSON dans app_settings). */
+export type MarkpadFeatureFlags = {
+  kanban: boolean;
+  chat: boolean;
+  history: boolean;
+  folderTree: boolean;
+};
+
+const MARKPAD_FEATURES_KEY = "markpad_features";
+
+const DEFAULT_MARKPAD_FEATURES: MarkpadFeatureFlags = {
+  kanban: true,
+  chat: true,
+  history: true,
+  folderTree: true
+};
+
+export function seedMarkpadFeatureFlagsIfMissing(db: Database.Database): void {
+  db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)`).run(
+    MARKPAD_FEATURES_KEY,
+    JSON.stringify(DEFAULT_MARKPAD_FEATURES)
+  );
+}
+
+export function getMarkpadFeatureFlags(db: Database.Database): MarkpadFeatureFlags {
+  const row = db
+    .prepare(`SELECT value FROM app_settings WHERE key = ?`)
+    .get(MARKPAD_FEATURES_KEY) as { value: string } | undefined;
+  if (!row?.value) return { ...DEFAULT_MARKPAD_FEATURES };
+  try {
+    const parsed = JSON.parse(row.value) as Partial<MarkpadFeatureFlags>;
+    return { ...DEFAULT_MARKPAD_FEATURES, ...parsed };
+  } catch {
+    return { ...DEFAULT_MARKPAD_FEATURES };
+  }
+}
+
+export function setMarkpadFeatureFlags(
+  db: Database.Database,
+  patch: Partial<MarkpadFeatureFlags>
+): MarkpadFeatureFlags {
+  const cur = getMarkpadFeatureFlags(db);
+  const next: MarkpadFeatureFlags = { ...cur };
+  (Object.keys(patch) as (keyof MarkpadFeatureFlags)[]).forEach((k) => {
+    if (typeof patch[k] === "boolean") next[k] = patch[k]!;
+  });
+  db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)`).run(
+    MARKPAD_FEATURES_KEY,
+    JSON.stringify(next)
+  );
+  return next;
+}

@@ -39,6 +39,7 @@ import { HistoryPanel } from "./HistoryPanel";
 import { RoomChatPanel } from "./RoomChatPanel";
 import { BaseKanbanBoard } from "./BaseKanbanBoard";
 import { parseBaseKanban } from "../base/parseBaseFile";
+import { useMarkpadPublicConfig } from "../hooks/useMarkpadPublicConfig";
 
 const DISPLAY_NAME_KEY = "markpad-display-name";
 const UI_ONBOARDING_KEY = "markpad-ui-onboarding";
@@ -78,6 +79,7 @@ const getStableUserId = (): string => {
 export const App = () => {
   const { t, i18n } = useTranslation();
   const { roomId = "" } = useParams();
+  const { features: moduleFeatures } = useMarkpadPublicConfig();
   const mountRef = useRef<HTMLDivElement | null>(null);
   const stableUserId = useMemo(() => getStableUserId(), []);
 
@@ -152,11 +154,39 @@ export const App = () => {
     return parseBaseKanban(markdown);
   }, [folderMode, activeFilePath, markdown]);
 
+  const effectiveBaseBoard = useMemo(
+    () => (moduleFeatures.kanban ? parsedBaseBoard : null),
+    [moduleFeatures.kanban, parsedBaseBoard]
+  );
+
+  const showTreePanel =
+    moduleFeatures.folderTree && folderMode && treeOpen && folderPaths.length > 0;
+  const showHistoryPanel = moduleFeatures.history && historyOpen;
+  const showChatPanel = moduleFeatures.chat && chatOpen;
+
   useEffect(() => {
-    if (viewMode === "kanban" && !parsedBaseBoard) {
+    if (viewMode === "kanban" && !effectiveBaseBoard) {
       setViewMode("split");
     }
-  }, [viewMode, parsedBaseBoard]);
+  }, [viewMode, effectiveBaseBoard]);
+
+  useEffect(() => {
+    if (!moduleFeatures.kanban && viewMode === "kanban") {
+      setViewMode("split");
+    }
+  }, [moduleFeatures.kanban, viewMode]);
+
+  useEffect(() => {
+    if (!moduleFeatures.chat && chatOpen) setChatOpen(false);
+  }, [moduleFeatures.chat, chatOpen]);
+
+  useEffect(() => {
+    if (!moduleFeatures.history && historyOpen) setHistoryOpen(false);
+  }, [moduleFeatures.history, historyOpen]);
+
+  useEffect(() => {
+    if (!moduleFeatures.folderTree && treeOpen) setTreeOpen(false);
+  }, [moduleFeatures.folderTree, treeOpen]);
 
   useEffect(() => {
     if (
@@ -578,7 +608,7 @@ export const App = () => {
               >
                 <Columns2 size={18} strokeWidth={2} />
               </button>
-              {folderMode && parsedBaseBoard ? (
+              {folderMode && effectiveBaseBoard ? (
                 <button
                   type="button"
                   className={iconBtnClass(viewMode === "kanban")}
@@ -593,7 +623,7 @@ export const App = () => {
             </div>
             <div className="obsidian-toolbar__sep" aria-hidden />
             <div className="obsidian-toolbar__group">
-              {folderMode && folderPaths.length > 0 ? (
+              {folderMode && folderPaths.length > 0 && moduleFeatures.folderTree ? (
                 <button
                   type="button"
                   className={iconBtnClass(treeOpen)}
@@ -615,6 +645,7 @@ export const App = () => {
               >
                 <ListTree size={18} strokeWidth={2} />
               </button>
+              {moduleFeatures.history ? (
               <button
                 type="button"
                 className={iconBtnClass(historyOpen)}
@@ -625,6 +656,8 @@ export const App = () => {
               >
                 <Clock size={18} strokeWidth={2} />
               </button>
+              ) : null}
+              {moduleFeatures.chat ? (
               <button
                 type="button"
                 className={iconBtnClass(chatOpen)}
@@ -635,6 +668,7 @@ export const App = () => {
               >
                 <MessageSquare size={18} strokeWidth={2} />
               </button>
+              ) : null}
               <button
                 type="button"
                 className="obsidian-tool"
@@ -792,9 +826,9 @@ export const App = () => {
         <Group
           orientation="horizontal"
           id="markpad-outer"
-          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${historyOpen ? "" : " workspace--no-history"}${chatOpen ? "" : " workspace--no-chat"}${folderMode ? " workspace--folder" : ""}${folderMode && !treeOpen ? " workspace--no-tree" : ""}`}
+          className={`workspace workspace--${viewMode}${tocOpen ? "" : " workspace--no-toc"}${showHistoryPanel ? "" : " workspace--no-history"}${showChatPanel ? "" : " workspace--no-chat"}${folderMode ? " workspace--folder" : ""}${folderMode && !showTreePanel ? " workspace--no-tree" : ""}`}
         >
-          {folderMode && treeOpen && folderPaths.length > 0 ? (
+          {showTreePanel ? (
             <>
               <Panel
                 id="tree"
@@ -818,7 +852,7 @@ export const App = () => {
           <Panel
             id="main"
             defaultSize={
-              folderMode && treeOpen && folderPaths.length > 0 ? "50%" : "72%"
+              showTreePanel ? "50%" : "72%"
             }
             minSize="12%"
             maxSize="96%"
@@ -826,7 +860,7 @@ export const App = () => {
             <section
               className={`editor-shell ${showEditor && showPreview ? "editor-shell--fill" : ""}${!showEditor && showPreview ? " editor-shell--preview-only" : ""}${viewMode === "kanban" ? " editor-shell--kanban" : ""}`}
             >
-              {viewMode === "kanban" && parsedBaseBoard && runtime ? (
+              {viewMode === "kanban" && effectiveBaseBoard && runtime ? (
                 <>
                   <div
                     ref={mountRef}
@@ -837,7 +871,7 @@ export const App = () => {
                     <BaseKanbanBoard
                       ydoc={runtime.doc}
                       folderPaths={folderPaths}
-                      parsed={parsedBaseBoard}
+                      parsed={effectiveBaseBoard}
                     />
                   </div>
                 </>
@@ -916,7 +950,7 @@ export const App = () => {
             </>
           ) : null}
 
-          {historyOpen ? (
+          {showHistoryPanel ? (
             <>
               <Separator className="resize-handle" />
               <Panel
@@ -937,7 +971,7 @@ export const App = () => {
             </>
           ) : null}
 
-          {chatOpen ? (
+          {showChatPanel ? (
             <>
               <Separator className="resize-handle" />
               <Panel

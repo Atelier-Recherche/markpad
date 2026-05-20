@@ -10,7 +10,10 @@ import {
   listUsers,
   setAllowPublicSignup,
   getChatRetentionHours,
-  setChatRetentionHours
+  setChatRetentionHours,
+  getMarkpadFeatureFlags,
+  setMarkpadFeatureFlags,
+  type MarkpadFeatureFlags
 } from "../db/sqlite.js";
 import type { RedisDocStore } from "../persistence/redisDocStore.js";
 import type { SessionStore } from "../sessionStore.js";
@@ -71,14 +74,19 @@ export const registerAdminApi = (
     if (!admin) return;
     res.json({
       allowPublicSignup: getAllowPublicSignup(db),
-      chatRetentionHours: getChatRetentionHours(db)
+      chatRetentionHours: getChatRetentionHours(db),
+      features: getMarkpadFeatureFlags(db)
     });
   });
 
   app.patch("/admin/settings", async (req, res) => {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
-    const body = req.body as { allowPublicSignup?: unknown; chatRetentionHours?: unknown };
+    const body = req.body as {
+      allowPublicSignup?: unknown;
+      chatRetentionHours?: unknown;
+      features?: unknown;
+    };
     let changed = false;
     if (typeof body.allowPublicSignup === "boolean") {
       setAllowPublicSignup(db, body.allowPublicSignup);
@@ -88,13 +96,27 @@ export const registerAdminApi = (
       setChatRetentionHours(db, body.chatRetentionHours);
       changed = true;
     }
+    if (body.features && typeof body.features === "object" && body.features !== null) {
+      const f = body.features as Record<string, unknown>;
+      const patch: Partial<MarkpadFeatureFlags> = {};
+      for (const key of ["kanban", "chat", "history", "folderTree"] as const) {
+        if (typeof f[key] === "boolean") patch[key] = f[key];
+      }
+      if (Object.keys(patch).length > 0) {
+        setMarkpadFeatureFlags(db, patch);
+        changed = true;
+      }
+    }
     if (!changed) {
-      res.status(400).json({ error: "allowPublicSignup_or_chatRetentionHours_required" });
+      res
+        .status(400)
+        .json({ error: "no_valid_settings_fields" });
       return;
     }
     res.json({
       allowPublicSignup: getAllowPublicSignup(db),
-      chatRetentionHours: getChatRetentionHours(db)
+      chatRetentionHours: getChatRetentionHours(db),
+      features: getMarkpadFeatureFlags(db)
     });
   });
 
