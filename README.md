@@ -117,6 +117,22 @@ Build + restart **web uniquement** :
 powershell -ExecutionPolicy Bypass -File .\deploy-markpad.ps1 -Target web
 ```
 
+### Déploiement Morglaf (`deploy-to-morglaf.ps1`, local, gitignored)
+
+Le script pousse `main` sur GitHub puis exécute `docker-compose up -d --build` sur le serveur. Pour voir l’**onglet Admin → Réglages** (rendu avancé / modules) :
+
+1. **Commiter** les changements web localement (le script fait `git add .` + commit sauf si `-NoCommit`).
+2. Lancer le déploiement **sans** `-NoRebuild` (sinon l’ancienne image Docker `web` reste servie).
+3. Sur https://obsidian.morglaf.com/admin : **Ctrl+F5** (cache navigateur).
+
+Exemple :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy-to-morglaf.ps1 -FastDeploy
+```
+
+`-FastDeploy` = `git pull` + rebuild Docker (sans effacer tout le dossier serveur).
+
 Build + deployment **plugin uniquement** :
 
 ```powershell

@@ -11,6 +11,7 @@ import {
 import {
   applyFrontmatterPatchToYText,
   getCardTitle,
+  healNoteYTextIfNeeded,
   parseFrontmatterRecord,
   readTagsFromFrontmatter
 } from "../base/patchFrontmatter";
@@ -74,7 +75,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
       if (!fileMatchesBaseFilter(p, parsed.filterPrefix, folderPaths)) continue;
       const yt = files.get(p) as Y.Text | undefined;
       if (!yt) continue;
-      const raw = yt.toString();
+      const raw = healNoteYTextIfNeeded(yt);
       next.push({
         path: p,
         title: getCardTitle(p, raw),

@@ -1,7 +1,12 @@
 import * as Y from "yjs";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { patchFrontmatterRecord, readTagsFromFrontmatter } from "../base/patchFrontmatter";
+import {
+  healNoteYTextIfNeeded,
+  normalizeNoteDocument,
+  patchFrontmatterRecord,
+  readTagsFromFrontmatter
+} from "../base/patchFrontmatter";
 
 const TAG_SPLIT = /[,;\s#]+/g;
 
@@ -32,7 +37,7 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
     const files = ydoc.getMap<Y.Text>("files");
     const yt = files.get(path);
     if (!(yt instanceof Y.Text)) return;
-    const raw = yt.toString();
+    const raw = healNoteYTextIfNeeded(yt);
     setFullText(raw);
     setTagsInput(readTagsFromFrontmatter(raw).join(", "));
   }, [path, ydoc]);
@@ -60,14 +65,19 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
     const yt = files.get(path);
     if (!(yt instanceof Y.Text)) return;
     const tags = parseTagsFromInput(tagsInput);
-    const merged = patchFrontmatterRecord(fullText, {
+    const base = normalizeNoteDocument(fullText);
+    const merged = patchFrontmatterRecord(base, {
       tags: tags.length ? tags : undefined,
       tag: undefined
     });
-    ydoc.transact(() => {
-      yt.delete(0, yt.length);
+    const doc = yt.doc;
+    const write = (): void => {
+      const len = yt.length;
+      if (len > 0) yt.delete(0, len);
       yt.insert(0, merged);
-    });
+    };
+    if (doc) doc.transact(write, "markpad-kanban-modal");
+    else write();
     onClose();
   };
 
