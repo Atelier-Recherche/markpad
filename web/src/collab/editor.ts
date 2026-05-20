@@ -157,6 +157,8 @@ export const createCollabEditor = (input: {
   guestLabel?: string;
   folderPaths?: string[];
   activeFilePath?: string | null;
+  /** Aperçu live éditeur : surlignage des tableaux GFM (défaut true). */
+  markdownTables?: boolean;
 }): CollabRuntime => {
   const ydoc = new Y.Doc();
 
@@ -254,7 +256,9 @@ export const createCollabEditor = (input: {
           markdown({ base: markdownLanguage }),
           markpadCmTheme,
           frontmatterHiddenField,
-          createLivePreviewExtension(),
+          createLivePreviewExtension({
+            tables: input.markdownTables !== false
+          }),
           placeholder("Markdown collaboratif…"),
           yCollabExt,
           EditorView.updateListener.of((u) => {

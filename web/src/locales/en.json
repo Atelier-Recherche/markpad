@@ -72,7 +72,7 @@
     "disconnected": "Chat disconnected"
   },
   "kanban": {
-    "hint": "Drag a card onto a column to update frontmatter (Base Board / Obsidian Bases; minimal file.inFolder filter support)."
+    "hint": "Drag a card onto a column to move it (frontmatter). Double-click a card to edit it in split view. Tags from YAML `tags` are shown on the card."
   },
   "language": {
     "label": "Language"
@@ -183,8 +183,14 @@
     "chatRetentionSave": "Save",
     "featuresCardTitle": "Shared room UI modules",
     "featuresHint": "These apply to everyone opening /share/... links; values are read when the page loads.",
+    "featuresAdvancedTitle": "Advanced rendering",
+    "featuresAdvancedHint": "Controls Kanban (Obsidian Bases) and Markdown table rendering in the web client.",
+    "featuresModulesTitle": "Other modules",
+    "featuresModulesHint": "Chat, history, and navigation; separate from extended Markdown preview.",
     "featureKanban": "Kanban view (.base files)",
     "featureKanbanHint": "Column board for Obsidian Bases (table/kanban views with groupBy on a note property).",
+    "featureMarkdownTables": "Markdown tables (GFM)",
+    "featureMarkdownTablesHint": "HTML table preview plus in-editor table highlighting. The Markdown source is unchanged.",
     "featureChat": "Room chat",
     "featureChatHint": "Side panel and messaging WebSocket; REST returns 403 when disabled.",
     "featureHistory": "Version history",

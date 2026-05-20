@@ -7,13 +7,19 @@ import {
   NO_VALUE_COLUMN,
   type ParsedBaseKanban
 } from "../base/parseBaseFile";
-import { getCardTitle, parseFrontmatterRecord, patchFrontmatterRecord } from "../base/patchFrontmatter";
+import {
+  applyFrontmatterPatchToYText,
+  getCardTitle,
+  parseFrontmatterRecord,
+  readTagsFromFrontmatter
+} from "../base/patchFrontmatter";
 
 export type KanbanCardModel = {
   path: string;
   title: string;
   column: string;
   order: number;
+  tags: string[];
 };
 
 const readColumn = (raw: string, prop: string): string => {
@@ -48,9 +54,11 @@ type BaseKanbanBoardProps = {
   ydoc: Y.Doc;
   folderPaths: string[];
   parsed: ParsedBaseKanban;
+  /** Double-clic : ouvrir la note en édition (p.ex. vue fractionnée). */
+  onOpenCard?: (path: string) => void;
 };
 
-export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardProps) => {
+export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed, onOpenCard }: BaseKanbanBoardProps) => {
   const { t } = useTranslation();
   const [cards, setCards] = useState<KanbanCardModel[]>([]);
   const [dragPath, setDragPath] = useState<string | null>(null);
@@ -67,7 +75,8 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
         path: p,
         title: getCardTitle(p, raw),
         column: readColumn(raw, parsed.groupByProperty),
-        order: readOrder(raw)
+        order: readOrder(raw),
+        tags: readTagsFromFrontmatter(raw)
       });
     }
     next.sort((a, b) => {
@@ -80,12 +89,28 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
   useEffect(() => {
     recompute();
     const files = ydoc.getMap<Y.Text>("files");
-    const obs = (): void => {
+    const mapObs = (): void => {
       recompute();
     };
-    files.observe(obs);
-    return () => files.unobserve(obs);
-  }, [ydoc, recompute]);
+    files.observe(mapObs);
+    const textObservers: Array<{ text: Y.Text; fn: () => void }> = [];
+    for (const p of folderPaths) {
+      if (!fileMatchesBaseFilter(p, parsed.filterPrefix, folderPaths)) continue;
+      const text = files.get(p);
+      if (!(text instanceof Y.Text)) continue;
+      const fn = (): void => {
+        recompute();
+      };
+      text.observe(fn);
+      textObservers.push({ text, fn });
+    }
+    return () => {
+      files.unobserve(mapObs);
+      for (const { text, fn } of textObservers) {
+        text.unobserve(fn);
+      }
+    };
+  }, [ydoc, recompute, folderPaths, parsed.filterPrefix]);
 
   const columns = useMemo(() => buildColumns(cards, parsed.columnOrder), [cards, parsed.columnOrder]);
 
@@ -109,15 +134,15 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     const colCards = cards.filter((c) => c.column === targetColumn && c.path !== path);
     const maxOrder = colCards.reduce((acc, c) => Math.max(acc, Number.isFinite(c.order) ? c.order : 0), -1);
     const nextOrder = maxOrder + 1;
+    const patch: Record<string, unknown | undefined> =
+      targetColumn === NO_VALUE_COLUMN
+        ? { [parsed.groupByProperty]: undefined, [KANBAN_ORDER_KEY]: nextOrder }
+        : { [parsed.groupByProperty]: targetColumn, [KANBAN_ORDER_KEY]: nextOrder };
     ydoc.transact(() => {
-      const raw = yt.toString();
-      const patch: Record<string, unknown | undefined> =
-        targetColumn === NO_VALUE_COLUMN
-          ? { [parsed.groupByProperty]: undefined, [KANBAN_ORDER_KEY]: nextOrder }
-          : { [parsed.groupByProperty]: targetColumn, [KANBAN_ORDER_KEY]: nextOrder };
-      const updated = patchFrontmatterRecord(raw, patch);
-      yt.delete(0, yt.length);
-      yt.insert(0, updated);
+      const ok = applyFrontmatterPatchToYText(yt, patch);
+      if (!ok) {
+        console.warn("Markpad Kanban: impossible de fusionner le frontmatter (YAML invalide ?).");
+      }
     });
   };
 
@@ -161,6 +186,10 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
                   draggable
                   className={`base-kanban__card${dragPath === c.path ? " base-kanban__card--drag" : ""}`}
                   title={c.path}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    onOpenCard?.(c.path);
+                  }}
                   onDragStart={(e) => {
                     e.dataTransfer.setData("text/markpad-path", c.path);
                     e.dataTransfer.effectAllowed = "move";
@@ -169,6 +198,15 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
                   onDragEnd={onDragEnd}
                 >
                   <span className="base-kanban__card-title">{c.title}</span>
+                  {c.tags.length > 0 ? (
+                    <div className="base-kanban__card-tags">
+                      {c.tags.map((tg) => (
+                        <span key={`${c.path}:${tg}`} className="base-kanban__tag">
+                          {tg.replace(/^#/, "")}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <span className="base-kanban__card-path">{c.path.split("/").pop()}</span>
                 </div>
               ))}

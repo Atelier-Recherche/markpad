@@ -72,7 +72,7 @@
     "disconnected": "Chat getrennt"
   },
   "kanban": {
-    "hint": "Karte auf eine Spalte ziehen, um das Frontmatter anzupassen (Base Board / Obsidian Bases, minimale file.inFolder-Unterstützung)."
+    "hint": "Karte auf eine Spalte ziehen (Frontmatter). Doppelklick öffnet die Notiz in geteilter Ansicht. YAML-Feld « tags » erscheint auf der Karte."
   },
   "language": {
     "label": "Sprache"
@@ -183,8 +183,14 @@
     "chatRetentionSave": "Speichern",
     "featuresCardTitle": "Module der geteilten Oberfläche",
     "featuresHint": "Gilt für alle, die /share/...-Links öffnen; Werte werden beim Laden gelesen.",
+    "featuresAdvancedTitle": "Erweiterte Darstellung",
+    "featuresAdvancedHint": "Steuert Kanban (Obsidian Bases) und die Darstellung von Markdown-Tabellen im Web.",
+    "featuresModulesTitle": "Weitere Module",
+    "featuresModulesHint": "Chat, Verlauf und Navigation; unabhängig von erweiterter Markdown-Vorschau.",
     "featureKanban": "Kanban (.base-Dateien)",
     "featureKanbanHint": "Spaltenboard für Obsidian Bases (Tabellen-/Kanban-Ansicht mit groupBy auf einer Notiz-Eigenschaft).",
+    "featureMarkdownTables": "Markdown-Tabellen (GFM)",
+    "featureMarkdownTablesHint": "HTML-Vorschau für Tabellen und Hervorhebung im Editor. Die Quelle bleibt unverändert.",
     "featureChat": "Raum-Chat",
     "featureChatHint": "Seitenleiste und WebSocket; REST liefert 403, wenn deaktiviert.",
     "featureHistory": "Versionsverlauf",

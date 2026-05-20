@@ -47,6 +47,7 @@ type Tab = "shares" | "users";
 
 const defaultFeaturesState: MarkpadPublicFeatures = {
   kanban: true,
+  markdownTables: true,
   chat: true,
   history: true,
   folderTree: true
@@ -431,9 +432,49 @@ export const AdminPanel = () => {
             <p className="me-muted" style={{ marginBottom: 14, fontSize: 13 }}>
               {t("admin.featuresHint")}
             </p>
+            <h4 className="me-section-title" style={{ fontSize: "0.98rem", margin: "0 0 10px" }}>
+              {t("admin.featuresAdvancedTitle")}
+            </h4>
+            <p className="me-muted" style={{ marginBottom: 12, fontSize: 13 }}>
+              {t("admin.featuresAdvancedHint")}
+            </p>
             {(
               [
                 ["kanban", "featureKanban", "featureKanbanHint"],
+                ["markdownTables", "featureMarkdownTables", "featureMarkdownTablesHint"]
+              ] as const
+            ).map(([key, labelKey, hintKey]) => (
+              <label
+                key={key}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  marginBottom: 12,
+                  cursor: settingsSaving ? "wait" : "pointer"
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={features[key]}
+                  disabled={settingsSaving}
+                  onChange={(e) => void saveModuleFeature(key, e.target.checked)}
+                />
+                <span>
+                  <strong>{t(`admin.${labelKey}`)}</strong>
+                  <br />
+                  <span className="me-muted">{t(`admin.${hintKey}`)}</span>
+                </span>
+              </label>
+            ))}
+            <h4 className="me-section-title" style={{ fontSize: "0.98rem", margin: "18px 0 10px" }}>
+              {t("admin.featuresModulesTitle")}
+            </h4>
+            <p className="me-muted" style={{ marginBottom: 12, fontSize: 13 }}>
+              {t("admin.featuresModulesHint")}
+            </p>
+            {(
+              [
                 ["chat", "featureChat", "featureChatHint"],
                 ["history", "featureHistory", "featureHistoryHint"],
                 ["folderTree", "featureFolderTree", "featureFolderTreeHint"]

@@ -72,7 +72,7 @@
     "disconnected": "Chat desconectado"
   },
   "kanban": {
-    "hint": "Arrastra una tarjeta a una columna para actualizar el frontmatter (Base Board / Obsidian Bases; soporte mínimo de file.inFolder)."
+    "hint": "Arrastra una tarjeta a una columna para moverla (frontmatter). Doble clic abre vista dividida para editar. Las etiquetas del YAML « tags » se muestran en la tarjeta."
   },
   "language": {
     "label": "Idioma"
@@ -183,8 +183,14 @@
     "chatRetentionSave": "Guardar",
     "featuresCardTitle": "Módulos de la interfaz (salas)",
     "featuresHint": "Se aplican a quien abra enlaces /share/...; se leen al cargar la página.",
+    "featuresAdvancedTitle": "Renderizado avanzado",
+    "featuresAdvancedHint": "Controla Kanban (Obsidian Bases) y tablas Markdown en el cliente web.",
+    "featuresModulesTitle": "Otros módulos",
+    "featuresModulesHint": "Chat, historial y navegación; independiente de la vista Markdown extendida.",
     "featureKanban": "Vista Kanban (archivos .base)",
     "featureKanbanHint": "Tablero por columnas para Bases de Obsidian (vistas tabla/kanban con groupBy sobre una propiedad).",
+    "featureMarkdownTables": "Tablas Markdown (GFM)",
+    "featureMarkdownTablesHint": "Vista HTML de tablas y resaltado en el editor. El Markdown fuente no cambia.",
     "featureChat": "Chat de sala",
     "featureChatHint": "Panel lateral y WebSocket; la API devuelve 403 si está desactivado.",
     "featureHistory": "Historial de versiones",

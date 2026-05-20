@@ -82,6 +82,12 @@ type PersistedShare = {
 };
 const SHARE_FRONTMATTER_KEY = "markpadShare";
 const FOLDER_SHARE_FILENAME = ".markpad-folder-share.md";
+
+/** Fichiers synchronisés dans un partage dossier (notes Markdown + bases Obsidian `.base`). */
+const isFolderSharePath = (vaultPath: string): boolean => {
+  const p = vaultPath.toLowerCase();
+  return p.endsWith(".md") || p.endsWith(".base");
+};
 const FOLDER_SHARE_FM = "markpadFolderShare";
 
 const MARKPAD_INDICATOR_CSS = `
@@ -558,7 +564,7 @@ export default class MarkpadPlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (!(file instanceof TFile) || !this.isMarkdownFile(file)) return;
+        if (!(file instanceof TFile) || !this.isFolderShareSyncFile(file)) return;
         void this.onMarkdownCreated(file);
       })
     );
@@ -601,6 +607,13 @@ export default class MarkpadPlugin extends Plugin {
 
   private isMarkdownFile(file: TAbstractFile): file is TFile {
     return file instanceof TFile && file.extension.toLowerCase() === "md";
+  }
+
+  /** Markdown ou fichier `.base` (Obsidian Bases / Kanban web). */
+  private isFolderShareSyncFile(file: TAbstractFile): file is TFile {
+    if (!(file instanceof TFile)) return false;
+    const ext = file.extension.toLowerCase();
+    return ext === "md" || ext === "base";
   }
 
   /** Laisse Obsidian mettre à jour le buffer après une écriture disque (ex. frontmatter). */
@@ -1263,9 +1276,9 @@ export default class MarkpadPlugin extends Plugin {
         roomPassword: roomPassword || undefined
       });
       if (validated.kind === "folder") {
-        const filePaths = validated.filePaths.filter((p) => p.endsWith(".md"));
+        const filePaths = validated.filePaths.filter((p) => isFolderSharePath(p));
         if (filePaths.length === 0) {
-          throw new Error("folder_share_without_markdown_files");
+          throw new Error("folder_share_without_syncable_files");
         }
         const folderRoot = commonFolderRootOf(filePaths);
         const anchorPath = normalizePath(
@@ -1282,7 +1295,9 @@ export default class MarkpadPlugin extends Plugin {
         for (const p of meta.paths) {
           this.sharedNotes.set(p, { roomId: meta.roomId, shareUrl: meta.shareUrl });
         }
-        const openedFile = await this.ensureMarkdownFileExists(meta.paths[0]!);
+        const openPath =
+          meta.paths.find((p) => p.toLowerCase().endsWith(".md")) ?? meta.paths[0]!;
+        const openedFile = await this.ensureMarkdownFileExists(openPath);
         await this.app.workspace.getLeaf(false).openFile(openedFile);
         const active = this.getActiveMarkdownFileAndView();
         if (!active || active.file.path !== openedFile.path) {
@@ -1337,8 +1352,11 @@ export default class MarkpadPlugin extends Plugin {
     if (msg.includes("session_validate_failed (404)")) {
       return "Markpad: room introuvable (404).";
     }
-    if (msg.includes("folder_share_without_markdown_files")) {
-      return "Markpad: ce dossier partagé ne contient aucun fichier Markdown.";
+    if (
+      msg.includes("folder_share_without_markdown_files") ||
+      msg.includes("folder_share_without_syncable_files")
+    ) {
+      return "Markpad: ce dossier partagé ne contient aucun fichier syncable (Markdown ou .base).";
     }
     if (/already exists/i.test(msg)) {
       return "Markpad: conflit de fichier (« already exists »). Ferme les autres opérations sur ce vault et réessaie ; si ça persiste, redémarre Obsidian.";
@@ -2142,10 +2160,10 @@ export default class MarkpadPlugin extends Plugin {
     }
   }
 
-  private collectMarkdownPathsInFolder(folder: TFolder): string[] {
+  private collectFolderShareSyncPathsInFolder(folder: TFolder): string[] {
     const out: string[] = [];
     const walk = (f: TAbstractFile): void => {
-      if (f instanceof TFile && this.isMarkdownFile(f)) {
+      if (f instanceof TFile && this.isFolderShareSyncFile(f)) {
         if (f.name === FOLDER_SHARE_FILENAME) return;
         out.push(f.path);
       } else if (f instanceof TFolder) {
@@ -2163,9 +2181,16 @@ export default class MarkpadPlugin extends Plugin {
       new Notice("Configure API key et user ID avant de partager.");
       return;
     }
-    const paths = this.collectMarkdownPathsInFolder(folder);
+    const paths = this.collectFolderShareSyncPathsInFolder(folder);
     if (paths.length === 0) {
-      new Notice("Aucun fichier Markdown dans ce dossier.");
+      new Notice("Aucun fichier Markdown ni .base dans ce dossier.");
+      return;
+    }
+    const openMarkdownPath = paths.find((p) => p.toLowerCase().endsWith(".md"));
+    if (!openMarkdownPath) {
+      new Notice(
+        "Markpad : ajoutez au moins une note .md pour lancer le partage depuis Obsidian (les fichiers .base sont inclus pour le web)."
+      );
       return;
     }
     this.disconnect();
@@ -2199,7 +2224,7 @@ export default class MarkpadPlugin extends Plugin {
       }
       let active = this.getActiveMarkdownFileAndView();
       if (!active || !paths.includes(active.file.path)) {
-        const first = this.app.vault.getAbstractFileByPath(paths[0]);
+        const first = this.app.vault.getAbstractFileByPath(openMarkdownPath);
         if (first instanceof TFile) {
           await this.app.workspace.getLeaf(false).openFile(first);
         }
@@ -2502,6 +2527,7 @@ export default class MarkpadPlugin extends Plugin {
 
   private async onMarkdownCreated(file: TFile): Promise<void> {
     if (file.name === FOLDER_SHARE_FILENAME) return;
+    if (!this.isFolderShareSyncFile(file)) return;
     for (const [root, meta] of this.folderSharesMeta) {
       if (!isPathInFolder(file.path, root)) continue;
       if (meta.paths.includes(file.path)) continue;
@@ -2546,8 +2572,8 @@ export default class MarkpadPlugin extends Plugin {
         markpadCollabDebug("folder:sync skip (valeur non Y.Text)", path);
         continue;
       }
-      if (!path.endsWith(".md")) {
-        markpadCollabDebug("folder:sync skip (non .md)", path);
+      if (!isFolderSharePath(path)) {
+        markpadCollabDebug("folder:sync skip (non syncable)", path);
         continue;
       }
       if (!isPathInFolder(path, folderRoot)) {

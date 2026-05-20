@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 export type MarkpadPublicFeatures = {
   kanban: boolean;
+  /** Tableaux GFM : aperçu HTML + surlignage dans l’éditeur. */
+  markdownTables: boolean;
   chat: boolean;
   history: boolean;
   folderTree: boolean;
@@ -9,6 +11,7 @@ export type MarkpadPublicFeatures = {
 
 const DEFAULT_FEATURES: MarkpadPublicFeatures = {
   kanban: true,
+  markdownTables: true,
   chat: true,
   history: true,
   folderTree: true

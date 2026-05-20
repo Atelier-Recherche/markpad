@@ -63,6 +63,21 @@ const randomId = (): string => {
   return `web-${rnd[0].toString(16)}${rnd[1].toString(16)}`;
 };
 
+/** Fichier actif initial : préfère un `.base` si le Kanban est autorisé. */
+const pickInitialFolderActivePath = (paths: string[], kanbanEnabled: boolean): string | null => {
+  if (!paths.length) return null;
+  if (kanbanEnabled) {
+    const base = paths.find((p) => p.toLowerCase().endsWith(".base"));
+    if (base) return base;
+  }
+  const md = paths.find((p) => p.toLowerCase().endsWith(".md"));
+  if (md) return md;
+  return paths[0] ?? null;
+};
+
+const stripHtmlTables = (html: string): string =>
+  html.replace(/<table\b[\s\S]*?<\/table>/gi, "");
+
 const iconBtnClass = (active: boolean): string =>
   `obsidian-tool ${active ? "obsidian-tool--active" : ""}`;
 
@@ -222,7 +237,7 @@ export const App = () => {
             setFolderMode(true);
             setFolderPaths(data.filePaths);
             setFolderRootPrefix(typeof data.folderPath === "string" ? data.folderPath : "");
-            setActiveFilePath(data.filePaths[0] ?? null);
+            setActiveFilePath(pickInitialFolderActivePath(data.filePaths, moduleFeatures.kanban));
           } else {
             setFolderMode(false);
             setFolderPaths([]);
@@ -254,7 +269,18 @@ export const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [roomId, httpBaseUrl]);
+  }, [roomId, httpBaseUrl, moduleFeatures.kanban]);
+
+  /** Si le serveur désactive le Kanban après chargement, éviter de rester sur un `.base`. */
+  useEffect(() => {
+    if (!folderMode || folderPaths.length === 0) return;
+    setActiveFilePath((prev) => {
+      if (!moduleFeatures.kanban && prev?.toLowerCase().endsWith(".base")) {
+        return pickInitialFolderActivePath(folderPaths, false);
+      }
+      return prev;
+    });
+  }, [moduleFeatures.kanban, folderMode, folderPaths]);
 
   useEffect(() => {
     localStorage.setItem(DISPLAY_NAME_KEY, name);
@@ -311,7 +337,8 @@ export const App = () => {
       onTextChange: setMarkdown,
       guestLabel: t("guest"),
       folderPaths: folderMode ? folderPaths : undefined,
-      activeFilePath: folderMode ? activeFilePath : undefined
+      activeFilePath: folderMode ? activeFilePath : undefined,
+      markdownTables: moduleFeatures.markdownTables
     });
     setRuntime(rt);
     return () => {
@@ -331,7 +358,8 @@ export const App = () => {
     showLineNumbers,
     displayName,
     editorMountSurface,
-    viewMode
+    viewMode,
+    moduleFeatures.markdownTables
   ]);
 
   useEffect(() => {
@@ -412,8 +440,11 @@ export const App = () => {
         .replaceAll(">", "&gt;");
       html = `<pre>${escaped}</pre>`;
     }
+    if (!moduleFeatures.markdownTables) {
+      html = stripHtmlTables(html);
+    }
     return { renderedMarkdown: html, toc: items };
-  }, [markdown, hideFrontmatter]);
+  }, [markdown, hideFrontmatter, moduleFeatures.markdownTables]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -449,7 +480,7 @@ export const App = () => {
         setFolderMode(true);
         setFolderPaths(data.filePaths);
         setFolderRootPrefix(typeof data.folderPath === "string" ? data.folderPath : "");
-        setActiveFilePath(data.filePaths[0] ?? null);
+        setActiveFilePath(pickInitialFolderActivePath(data.filePaths, moduleFeatures.kanban));
       } else {
         setFolderMode(false);
         setFolderPaths([]);
@@ -461,7 +492,7 @@ export const App = () => {
     } catch {
       setJoinGate("error");
     }
-  }, [roomId, httpBaseUrl, password]);
+  }, [roomId, httpBaseUrl, password, moduleFeatures.kanban]);
 
   const onRenameSelf = (e: React.MouseEvent): void => {
     e.preventDefault();
@@ -872,6 +903,10 @@ export const App = () => {
                       ydoc={runtime.doc}
                       folderPaths={folderPaths}
                       parsed={effectiveBaseBoard}
+                      onOpenCard={(path) => {
+                        setActiveFilePath(path);
+                        setViewMode("split");
+                      }}
                     />
                   </div>
                 </>

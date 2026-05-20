@@ -99,7 +99,7 @@ export const registerAdminApi = (
     if (body.features && typeof body.features === "object" && body.features !== null) {
       const f = body.features as Record<string, unknown>;
       const patch: Partial<MarkpadFeatureFlags> = {};
-      for (const key of ["kanban", "chat", "history", "folderTree"] as const) {
+      for (const key of ["kanban", "markdownTables", "chat", "history", "folderTree"] as const) {
         if (typeof f[key] === "boolean") patch[key] = f[key];
       }
       if (Object.keys(patch).length > 0) {

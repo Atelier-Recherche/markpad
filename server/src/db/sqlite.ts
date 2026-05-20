@@ -356,6 +356,7 @@ export function listUsers(db: Database.Database) {
 /** Fonctionnalités UI / modules activables par l’admin (JSON dans app_settings). */
 export type MarkpadFeatureFlags = {
   kanban: boolean;
+  markdownTables: boolean;
   chat: boolean;
   history: boolean;
   folderTree: boolean;
@@ -365,6 +366,7 @@ const MARKPAD_FEATURES_KEY = "markpad_features";
 
 const DEFAULT_MARKPAD_FEATURES: MarkpadFeatureFlags = {
   kanban: true,
+  markdownTables: true,
   chat: true,
   history: true,
   folderTree: true
