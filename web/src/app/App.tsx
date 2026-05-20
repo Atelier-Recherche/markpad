@@ -903,10 +903,6 @@ export const App = () => {
                       ydoc={runtime.doc}
                       folderPaths={folderPaths}
                       parsed={effectiveBaseBoard}
-                      onOpenCard={(path) => {
-                        setActiveFilePath(path);
-                        setViewMode("split");
-                      }}
                     />
                   </div>
                 </>

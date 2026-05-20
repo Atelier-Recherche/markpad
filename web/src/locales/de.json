@@ -72,7 +72,17 @@
     "disconnected": "Chat getrennt"
   },
   "kanban": {
-    "hint": "Karte auf eine Spalte ziehen (Frontmatter). Doppelklick öffnet die Notiz in geteilter Ansicht. YAML-Feld « tags » erscheint auf der Karte."
+    "hint": "Karte ziehen, um sie zu verschieben. Doppelklick oder Stift: Bearbeiten im Dialog. Filter oben nach Schlagwort.",
+    "filterAll": "Alle",
+    "filterAria": "Karten nach Schlagwort filtern",
+    "editCard": "Notiz bearbeiten",
+    "modalTags": "Tags",
+    "modalTagsPlaceholder": "z. B. todo, dringend",
+    "modalTagsHint": "Kommagetrennte Tags; als YAML-Liste « tags » (einzelnes « tag » wird entfernt).",
+    "modalContent": "Dateiinhalt",
+    "modalSave": "Speichern",
+    "modalCancel": "Abbrechen",
+    "modalClose": "Dialog schließen"
   },
   "language": {
     "label": "Sprache"
@@ -146,6 +156,7 @@
     "title": "Administration",
     "tabShares": "Indexierte Freigaben",
     "tabUsers": "Benutzer",
+    "tabSettings": "Einstellungen",
     "refresh": "Aktualisieren",
     "backMe": "Mein Konto",
     "backDemo": "Demo-Raum",

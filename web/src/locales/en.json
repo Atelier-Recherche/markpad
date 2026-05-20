@@ -72,7 +72,17 @@
     "disconnected": "Chat disconnected"
   },
   "kanban": {
-    "hint": "Drag a card onto a column to move it (frontmatter). Double-click a card to edit it in split view. Tags from YAML `tags` are shown on the card."
+    "hint": "Drag a card onto a column to move it. Double-click or pencil: edit in a pop-up (Markdown and tags). Use the tabs above to filter cards by tag.",
+    "filterAll": "All",
+    "filterAria": "Filter cards by tag",
+    "editCard": "Edit note",
+    "modalTags": "Tags",
+    "modalTagsPlaceholder": "e.g. todo, urgent",
+    "modalTagsHint": "Comma-separated tags; stored as YAML list « tags » (singular « tag » is removed to avoid duplicates).",
+    "modalContent": "File content",
+    "modalSave": "Save",
+    "modalCancel": "Cancel",
+    "modalClose": "Close dialog"
   },
   "language": {
     "label": "Language"
@@ -146,6 +156,7 @@
     "title": "Administration",
     "tabShares": "Indexed shares",
     "tabUsers": "Users",
+    "tabSettings": "Settings",
     "refresh": "Refresh",
     "backMe": "My account",
     "backDemo": "Demo room",

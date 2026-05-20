@@ -43,7 +43,7 @@ type AdminUser = {
   created_at: string;
 };
 
-type Tab = "shares" | "users";
+type Tab = "shares" | "users" | "settings";
 
 const defaultFeaturesState: MarkpadPublicFeatures = {
   kanban: true,
@@ -62,8 +62,8 @@ export const AdminPanel = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [allowPublicSignup, setAllowPublicSignup] = useState<boolean | null>(null);
-  const [chatRetentionHours, setChatRetentionHours] = useState<number | null>(null);
+  const [allowPublicSignup, setAllowPublicSignup] = useState<boolean | null>(true);
+  const [chatRetentionHours, setChatRetentionHours] = useState<number | null>(24);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [features, setFeatures] = useState<MarkpadPublicFeatures>(defaultFeaturesState);
 
@@ -328,7 +328,9 @@ export const AdminPanel = () => {
       <header className="me-top admin-header">
         <div>
           <h1 className="me-title">{t("admin.title")}</h1>
-          <p className="me-subtitle">{t("admin.tabShares")} · {t("admin.tabUsers")}</p>
+          <p className="me-subtitle">
+            {t("admin.tabShares")} · {t("admin.tabUsers")} · {t("admin.tabSettings")}
+          </p>
         </div>
         <div className="me-actions admin-header-actions">
           <button type="button" className="me-btn-secondary" disabled={loading} onClick={() => void loadAll()}>
@@ -362,11 +364,20 @@ export const AdminPanel = () => {
         >
           {t("admin.tabUsers")}
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "settings"}
+          className={`admin-tab ${tab === "settings" ? "admin-tab--active" : ""}`}
+          onClick={() => setTab("settings")}
+        >
+          {t("admin.tabSettings")}
+        </button>
       </div>
 
       {error ? <p className="join-error admin-error">{error}</p> : null}
 
-      {allowPublicSignup !== null && chatRetentionHours !== null ? (
+      {tab === "settings" ? (
         <section className="me-card" style={{ marginBottom: 16 }}>
           <h2 className="me-section-title">{t("admin.settingsCardTitle")}</h2>
           <label
@@ -379,7 +390,7 @@ export const AdminPanel = () => {
           >
             <input
               type="checkbox"
-              checked={allowPublicSignup}
+              checked={allowPublicSignup !== false}
               disabled={settingsSaving}
               onChange={(e) => void saveAllowSignup(e.target.checked)}
             />
@@ -398,7 +409,7 @@ export const AdminPanel = () => {
                 type="number"
                 min={1}
                 max={8760}
-                value={chatRetentionHours}
+                value={chatRetentionHours ?? 24}
                 disabled={settingsSaving}
                 onChange={(e) => {
                   const v = Number.parseInt(e.target.value, 10);
@@ -572,7 +583,7 @@ export const AdminPanel = () => {
             </div>
           )}
         </section>
-      ) : (
+      ) : tab === "users" ? (
         <section className="me-card admin-table-card">
           {users.length === 0 && !loading ? (
             <p className="me-muted">{t("admin.emptyUsers")}</p>
@@ -619,7 +630,7 @@ export const AdminPanel = () => {
             </div>
           )}
         </section>
-      )}
+      ) : null}
     </main>
   );
 };

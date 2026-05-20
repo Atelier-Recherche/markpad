@@ -72,7 +72,17 @@
     "disconnected": "Chat desconectado"
   },
   "kanban": {
-    "hint": "Arrastra una tarjeta a una columna para moverla (frontmatter). Doble clic abre vista dividida para editar. Las etiquetas del YAML « tags » se muestran en la tarjeta."
+    "hint": "Arrastra una tarjeta para moverla. Doble clic o lápiz: editar en ventana emergente. Pestañas arriba para filtrar por etiqueta.",
+    "filterAll": "Todas",
+    "filterAria": "Filtrar cartas por etiqueta",
+    "editCard": "Editar nota",
+    "modalTags": "Etiquetas",
+    "modalTagsPlaceholder": "p. ej. todo, urgente",
+    "modalTagsHint": "Etiquetas separadas por comas; se guardan como lista YAML « tags » (se quita « tag » en singular).",
+    "modalContent": "Contenido del archivo",
+    "modalSave": "Guardar",
+    "modalCancel": "Cancelar",
+    "modalClose": "Cerrar"
   },
   "language": {
     "label": "Idioma"
@@ -146,6 +156,7 @@
     "title": "Administración",
     "tabShares": "Compartidos indexados",
     "tabUsers": "Usuarios",
+    "tabSettings": "Ajustes",
     "refresh": "Actualizar",
     "backMe": "Mi cuenta",
     "backDemo": "Sala demo",

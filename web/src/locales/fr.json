@@ -72,7 +72,17 @@
     "disconnected": "Chat déconnecté"
   },
   "kanban": {
-    "hint": "Glissez une carte vers une colonne pour la déplacer (frontmatter). Double-cliquez pour ouvrir la note en vue fractionnée. Les étiquettes du champ YAML « tags » s’affichent sur la carte."
+    "hint": "Glissez une carte vers une colonne pour la déplacer. Double-clic ou crayon : édition dans une fenêtre (contenu Markdown et tags). Filtrez les cartes par étiquette avec les onglets ci-dessous.",
+    "filterAll": "Toutes",
+    "filterAria": "Filtrer les cartes par étiquette",
+    "editCard": "Modifier la note",
+    "modalTags": "Étiquettes (tags)",
+    "modalTagsPlaceholder": "ex. todo, urgent",
+    "modalTagsHint": "Séparez les étiquettes par des virgules ; elles sont écrites dans le frontmatter YAML (liste « tags », le champ « tag » seul est retiré).",
+    "modalContent": "Contenu du fichier",
+    "modalSave": "Enregistrer",
+    "modalCancel": "Annuler",
+    "modalClose": "Fermer la fenêtre"
   },
   "language": {
     "label": "Langue"
@@ -146,6 +156,7 @@
     "title": "Administration",
     "tabShares": "Partages indexés",
     "tabUsers": "Utilisateurs",
+    "tabSettings": "Réglages",
     "refresh": "Actualiser",
     "backMe": "Mon compte",
     "backDemo": "Room démo",
