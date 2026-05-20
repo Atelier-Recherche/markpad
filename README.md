@@ -125,6 +125,8 @@ Le script pousse `main` sur GitHub puis exécute `docker-compose up -d --build` 
 2. Lancer le déploiement **sans** `-NoRebuild` (sinon l’ancienne image Docker `web` reste servie).
 3. Sur https://obsidian.morglaf.com/admin : **Ctrl+F5** (cache navigateur).
 
+Si Firefox affiche `Cannot GET /admin/` après F5 : l’image Docker **web** doit inclure le correctif nginx (page `/admin` servie par `index.html`, API seulement sous `/admin/shares`, etc.). Rebuild obligatoire : `docker-compose up -d --build web`.
+
 Exemple :
 
 ```powershell
