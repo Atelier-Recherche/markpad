@@ -43,9 +43,11 @@ import {
   hasNoteFileShape,
   isNoteFileEntry,
   mergeMetaFromParsed,
+  migrateFilesMapLegacyToV2,
   parseNoteFromMarkdown,
   seedFileEntryFromMarkdown,
-  seedNoteRootFromMarkdown
+  seedNoteRootFromMarkdown,
+  upgradeLegacyFileEntry
 } from "@markpad/collab-note";
 import { reconcileLocalBodyIntoY, RECONCILE_ORIGIN } from "./reconcile";
 import {
@@ -290,6 +292,8 @@ export default class MarkpadPlugin extends Plugin {
   private postSyncReconcileRunning = false;
   /** Débounce disque → Y pour les fichiers partagés (vault modify). */
   private vaultSyncTimers = new Map<string, ReturnType<typeof window.setTimeout>>();
+  /** Évite une boucle vault.modify ↔ syncFolderFilesFromY. */
+  private suppressVaultToY = false;
   private fileExplorerObserver: MutationObserver | null = null;
   private fileExplorerObservedEl: HTMLElement | null = null;
   /** Débounce : la liste virtualisée mutate en continu (~chaque frame) ; sans délai on saturerait le CPU. */
@@ -910,7 +914,7 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async syncVaultFileIntoY(file: TFile): Promise<void> {
-    if (!this.activeRuntime) return;
+    if (!this.activeRuntime || this.suppressVaultToY) return;
     const share = this.sharedNotes.get(file.path);
     if (!share || this.activeRuntime.roomId !== share.roomId) return;
     try {
@@ -922,12 +926,17 @@ export default class MarkpadPlugin extends Plugin {
         if (filePath !== file.path) return;
         return;
       }
+      let entry = getFileEntry(doc, file.path);
+      const files = doc.getMap("files");
+      const legacy = files.get(file.path);
+      if (!entry && legacy instanceof Y.Text) {
+        entry = upgradeLegacyFileEntry(doc, file.path, legacy, "markpad-vault-upgrade");
+      }
       const isActive = filePath === file.path;
-      if (isActive) {
-        const entry = getFileEntry(doc, file.path);
-        if (entry) {
-          mergeMetaFromParsed(doc, getMetaYMap(entry), parsed.meta, "markpad-vault-meta");
-        }
+      if (isActive && entry) {
+        const bodyY = getBodyYText(entry);
+        reconcileLocalBodyIntoY(doc, bodyY, parsed.body);
+        mergeMetaFromParsed(doc, getMetaYMap(entry), parsed.meta, "markpad-vault-meta");
         return;
       }
       seedFileEntryFromMarkdown(doc, file.path, raw, "markpad-vault-sync");
@@ -2580,6 +2589,10 @@ export default class MarkpadPlugin extends Plugin {
     this.decorateSharedUi();
     // En mode dossier, Yjs est la source de vérité des fragments fichiers :
     // éviter reconcile local->Y qui peut écraser un fragment actif distant.
+    const upgraded = migrateFilesMapLegacyToV2(doc, "markpad-folder-migrate-v2");
+    if (upgraded > 0) {
+      markpadCollabDebug("folder:migration Y.Text → body+meta", { upgraded });
+    }
     void this.syncFolderFilesFromY(meta, folderRoot, doc);
     this.updatePresenceInStatusBar(provider);
   }
@@ -2594,12 +2607,20 @@ export default class MarkpadPlugin extends Plugin {
       this.sharedNotes.set(file.path, { roomId: meta.roomId, shareUrl: meta.shareUrl });
       if (this.activeRuntime?.mode === "folder" && this.activeRuntime.roomId === meta.roomId) {
         const files = this.activeRuntime.doc.getMap("files");
-        if (!isNoteFileEntry(files.get(file.path))) {
+        const cur = files.get(file.path);
+        if (!(cur instanceof Y.Text) && !isNoteFileEntry(cur)) {
           const localRaw = await this.app.vault.read(file);
           seedFileEntryFromMarkdown(
             this.activeRuntime.doc,
             file.path,
             localRaw,
+            "markpad-folder-new-file"
+          );
+        } else if (cur instanceof Y.Text) {
+          upgradeLegacyFileEntry(
+            this.activeRuntime.doc,
+            file.path,
+            cur,
             "markpad-folder-new-file"
           );
         }
@@ -2626,43 +2647,92 @@ export default class MarkpadPlugin extends Plugin {
       mapEntries: files.size,
       metaPaths: meta.paths.length
     });
+    const activePath = this.activeRuntime.filePath;
+    const yPaths = new Set<string>();
     let changed = false;
-    for (const [path, value] of files.entries()) {
-      if (!isNoteFileEntry(value)) {
-        markpadCollabDebug("folder:sync skip (entrée non v2 body+meta)", path);
-        continue;
-      }
-      if (!isFolderSharePath(path)) {
-        markpadCollabDebug("folder:sync skip (non syncable)", path);
-        continue;
-      }
-      if (!isPathInFolder(path, folderRoot)) {
-        markpadCollabDebug("folder:sync skip (hors folderRoot)", { path, folderRoot });
-        continue;
-      }
-      if (path.endsWith(`/${FOLDER_SHARE_FILENAME}`)) continue;
-      if (!meta.paths.includes(path)) {
-        meta.paths.push(path);
-        this.sharedNotes.set(path, { roomId: meta.roomId, shareUrl: meta.shareUrl });
-        changed = true;
-        markpadCollabDebug("folder:sync nouvelle entrée meta depuis Y", path);
-      }
-      const existing = this.app.vault.getAbstractFileByPath(path);
-      if (!existing) {
-        try {
-          const dir = folderPartOf(path);
-          if (dir) {
-            await this.ensureFolderTree(dir);
-          }
-          await this.app.vault.create(path, assembleFileEntry(value));
+    this.suppressVaultToY = true;
+    try {
+      for (const [path, rawValue] of files.entries()) {
+        if (typeof path !== "string") continue;
+        let value: unknown = rawValue;
+        if (value instanceof Y.Text) {
+          value = upgradeLegacyFileEntry(doc, path, value, "markpad-folder-sync-upgrade");
+        }
+        if (!isNoteFileEntry(value)) {
+          markpadCollabDebug("folder:sync skip (entrée non v2 body+meta)", path);
+          continue;
+        }
+        if (!isFolderSharePath(path)) continue;
+        if (!isPathInFolder(path, folderRoot)) continue;
+        if (path.endsWith(`/${FOLDER_SHARE_FILENAME}`)) continue;
+
+        yPaths.add(path);
+        if (!meta.paths.includes(path)) {
+          meta.paths.push(path);
+          this.sharedNotes.set(path, { roomId: meta.roomId, shareUrl: meta.shareUrl });
           changed = true;
-          markpadCollabDebug("folder:sync fichier créé sur le vault depuis Y", path);
-        } catch (e) {
-          markpadCollabDebug("folder:sync création vault échouée", path, e);
+          markpadCollabDebug("folder:sync nouvelle entrée meta depuis Y", path);
+        }
+
+        const markdown = assembleFileEntry(value);
+        const existing = this.app.vault.getAbstractFileByPath(path);
+        if (!existing) {
+          try {
+            const dir = folderPartOf(path);
+            if (dir) await this.ensureFolderTree(dir);
+            await this.app.vault.create(path, markdown);
+            changed = true;
+            markpadCollabDebug("folder:sync fichier créé sur le vault depuis Y", path);
+          } catch (e) {
+            markpadCollabDebug("folder:sync création vault échouée", path, e);
+          }
+        } else if (existing instanceof TFile && path !== activePath) {
+          try {
+            const onDisk = await this.app.vault.read(existing);
+            if (onDisk !== markdown) {
+              await this.app.vault.modify(existing, markdown);
+              changed = true;
+              markpadCollabDebug("folder:sync fichier mis à jour depuis Y", path);
+            }
+          } catch (e) {
+            markpadCollabDebug("folder:sync modify vault échouée", path, e);
+          }
         }
       }
+
+      const removedFromY = meta.paths.filter(
+        (p) =>
+          isFolderSharePath(p) &&
+          isPathInFolder(p, folderRoot) &&
+          !p.endsWith(`/${FOLDER_SHARE_FILENAME}`) &&
+          !yPaths.has(p)
+      );
+      for (const path of removedFromY) {
+        meta.paths = meta.paths.filter((p) => p !== path);
+        this.sharedNotes.delete(path);
+        changed = true;
+        const existing = this.app.vault.getAbstractFileByPath(path);
+        if (existing instanceof TFile) {
+          try {
+            await this.app.vault.delete(existing);
+            markpadCollabDebug("folder:sync fichier supprimé du vault (absent de Y)", path);
+          } catch (e) {
+            markpadCollabDebug("folder:sync suppression vault échouée", path, e);
+          }
+        }
+        if (activePath === path) {
+          this.disconnect();
+        }
+      }
+    } finally {
+      this.suppressVaultToY = false;
     }
+
     if (changed) {
+      this.folderSharesMeta.set(folderRoot, meta);
+      if (this.activeRuntime.sharedPaths) {
+        this.activeRuntime.sharedPaths = meta.paths;
+      }
       await this.ensureFolderAnchorFile(meta.anchorPath, meta, meta.paths);
       this.decorateSharedUi();
       this.refreshSharesPanel();
@@ -2674,7 +2744,15 @@ export default class MarkpadPlugin extends Plugin {
     if (this.activeRuntime.filePath === file.path) return;
     const files = this.activeRuntime.doc.getMap("files");
     let fileEntry = getFileEntry(this.activeRuntime.doc, file.path);
-    if (!fileEntry) {
+    const legacy = files.get(file.path);
+    if (!fileEntry && legacy instanceof Y.Text) {
+      fileEntry = upgradeLegacyFileEntry(
+        this.activeRuntime.doc,
+        file.path,
+        legacy,
+        "markpad-folder-switch"
+      );
+    } else if (!fileEntry) {
       const raw = await this.app.vault.read(file);
       fileEntry = seedFileEntryFromMarkdown(
         this.activeRuntime.doc,

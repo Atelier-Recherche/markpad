@@ -1,5 +1,6 @@
 import YAML from "yaml";
 import { getFrontmatterPrefixLength } from "./frontmatter.js";
+import { stripEmbeddedFrontmatterFromBody } from "./sanitizeBody.js";
 
 const YAML_READ_OPTS = { strict: false, uniqueKeys: false } as const;
 
@@ -32,7 +33,7 @@ export function parseFrontmatterRecord(raw: string): Record<string, unknown> | n
 export function parseNoteFromMarkdown(raw: string): ParsedNote {
   const fmLen = getFrontmatterPrefixLength(raw);
   if (fmLen == null) {
-    return { meta: {}, body: raw.replace(/^\n+/, "") };
+    return { meta: {}, body: stripEmbeddedFrontmatterFromBody(raw) };
   }
   const full = parseFrontmatterRecord(raw) ?? {};
   const meta: Record<string, unknown> = {};
@@ -40,7 +41,7 @@ export function parseNoteFromMarkdown(raw: string): ParsedNote {
     if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
     meta[k] = v;
   }
-  const body = raw.slice(fmLen).replace(/^\n+/, "");
+  const body = stripEmbeddedFrontmatterFromBody(raw.slice(fmLen).replace(/^\n+/, ""));
   return { meta, body };
 }
 
@@ -49,7 +50,7 @@ export function assembleNoteToMarkdown(
   body: string,
   meta: Record<string, unknown>
 ): string {
-  const cleanBody = body.replace(/^\n+/, "");
+  const cleanBody = stripEmbeddedFrontmatterFromBody(body.replace(/^\n+/, ""));
   const keys = Object.keys(meta).filter((k) => !OBSIDIAN_ONLY_META_KEYS.has(k));
   if (keys.length === 0) {
     return cleanBody;

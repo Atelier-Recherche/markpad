@@ -41,6 +41,7 @@ import {
   getOrCreateNoteRoot,
   getBodyYText,
   hasNoteFileShape,
+  listCollaborativeFilePaths,
   metaMapToRecord
 } from "@markpad/collab-note";
 import { SUPPORTED_LOCALES, setLocale, type SupportedLocale } from "../i18n/index";
@@ -386,6 +387,49 @@ export const App = () => {
   useEffect(() => {
     runtime?.setLocalDisplayName(displayName);
   }, [displayName, runtime]);
+
+  useEffect(() => {
+    if (!folderMode || !runtime?.doc) return;
+    const doc = runtime.doc;
+    const files = doc.getMap("files");
+    const syncFromY = (): void => {
+      const fromY = listCollaborativeFilePaths(doc).filter(
+        (p) => p.endsWith(".md") || p.endsWith(".base")
+      );
+      if (fromY.length === 0) return;
+      const root = folderRootPrefix.replace(/\/$/, "");
+      const inShare = (p: string): boolean =>
+        !root || p === root || p.startsWith(`${root}/`);
+      setFolderPaths((prev) => {
+        const next = new Set(prev);
+        for (const p of fromY) next.add(p);
+        for (const p of prev) {
+          if (inShare(p) && !fromY.includes(p)) next.delete(p);
+        }
+        return [...next].sort((a, b) => a.localeCompare(b));
+      });
+      setActiveFilePath((prev) => {
+        if (prev && fromY.includes(prev)) return prev;
+        if (prev && !fromY.includes(prev)) {
+          return pickInitialFolderActivePath(fromY, moduleFeatures.kanban);
+        }
+        return prev;
+      });
+    };
+    syncFromY();
+    const obs = (): void => {
+      queueMicrotask(syncFromY);
+    };
+    files.observe(obs);
+    const onDoc = (): void => {
+      queueMicrotask(syncFromY);
+    };
+    doc.on("update", onDoc);
+    return () => {
+      files.unobserve(obs);
+      doc.off("update", onDoc);
+    };
+  }, [folderMode, runtime, folderRootPrefix, moduleFeatures.kanban]);
 
   useEffect(() => {
     runtime?.setFrontmatterFolded(hideFrontmatter);

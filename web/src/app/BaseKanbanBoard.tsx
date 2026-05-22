@@ -10,6 +10,7 @@ import {
   getBodyYText,
   getCardTitleFromNote,
   isNoteFileEntry,
+  listCollaborativeFilePaths,
   metaMapToRecord,
   readMetaNumber,
   readMetaScalar,
@@ -63,12 +64,18 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
   const [filterTag, setFilterTag] = useState<string>(FILTER_ALL);
   const [modalPath, setModalPath] = useState<string | null>(null);
 
+  const pathsToScan = useMemo(() => {
+    const fromY = listCollaborativeFilePaths(ydoc);
+    return [...new Set([...folderPaths, ...fromY])].sort((a, b) => a.localeCompare(b));
+  }, [ydoc, folderPaths]);
+
   const recompute = useCallback(() => {
     const files = ydoc.getMap("files");
     const next: KanbanCardModel[] = [];
-    for (const p of folderPaths) {
-      if (!fileMatchesBaseFilter(p, parsed.filterPrefix, folderPaths)) continue;
-      const entry = files.get(p);
+    for (const p of pathsToScan) {
+      if (!fileMatchesBaseFilter(p, parsed.filterPrefix, pathsToScan)) continue;
+      let entry = files.get(p);
+      if (entry instanceof Y.Text) continue;
       if (!isNoteFileEntry(entry)) continue;
       const meta = metaMapToRecord(getMetaYMap(entry));
       const body = getBodyYText(entry).toString();
@@ -86,7 +93,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
       return a.order - b.order || a.title.localeCompare(b.title);
     });
     setAllCards(next);
-  }, [ydoc, folderPaths, parsed.filterPrefix, parsed.groupByProperty]);
+  }, [ydoc, pathsToScan, parsed.filterPrefix, parsed.groupByProperty]);
 
   useEffect(() => {
     recompute();
@@ -97,8 +104,8 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     files.observe(mapObs);
     const bodyObservers: Array<{ text: Y.Text; fn: () => void }> = [];
     const metaObservers: Array<{ map: Y.Map<unknown>; fn: () => void }> = [];
-    for (const p of folderPaths) {
-      if (!fileMatchesBaseFilter(p, parsed.filterPrefix, folderPaths)) continue;
+    for (const p of pathsToScan) {
+      if (!fileMatchesBaseFilter(p, parsed.filterPrefix, pathsToScan)) continue;
       const entry = getFileEntry(ydoc, p) ?? getOrCreateFileEntry(ydoc, p);
       const body = getBodyYText(entry);
       const meta = getMetaYMap(entry);
@@ -124,7 +131,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
         map.unobserve(fn);
       }
     };
-  }, [ydoc, recompute, folderPaths, parsed.filterPrefix]);
+  }, [ydoc, recompute, pathsToScan, parsed.filterPrefix]);
 
   const tagList = useMemo(() => {
     const set = new Set<string>();

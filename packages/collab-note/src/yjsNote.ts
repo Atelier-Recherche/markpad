@@ -54,10 +54,34 @@ export function isNoteFileEntry(value: unknown): value is Y.Map<unknown> {
   return hasNoteFileShape(value);
 }
 
+/** Convertit un ancien `Y.Text` (fichier entier) en entrée v2 `{ body, meta }`. */
+export function upgradeLegacyFileEntry(
+  doc: Y.Doc,
+  path: string,
+  legacy: Y.Text,
+  origin?: unknown
+): Y.Map<unknown> {
+  const parsed = parseNoteFromMarkdown(legacy.toString());
+  const fileMap = new Y.Map<unknown>();
+  const body = new Y.Text();
+  const meta = new Y.Map<unknown>();
+  fileMap.set(KEY_BODY, body);
+  fileMap.set(KEY_META, meta);
+  doc.transact(() => {
+    doc.getMap(FILES_MAP_KEY).set(path, fileMap);
+    if (parsed.body.length > 0) body.insert(0, parsed.body);
+    recordToMetaMap(doc, parsed.meta, meta);
+  }, origin);
+  return fileMap;
+}
+
 export function getOrCreateFileEntry(doc: Y.Doc, path: string): Y.Map<unknown> {
   const files = doc.getMap(FILES_MAP_KEY);
-  let entry = files.get(path);
+  const entry = files.get(path);
   if (isNoteFileEntry(entry)) return entry;
+  if (entry instanceof Y.Text) {
+    return upgradeLegacyFileEntry(doc, path, entry, "markpad-upgrade-legacy");
+  }
   const fileMap = new Y.Map<unknown>();
   fileMap.set(KEY_BODY, new Y.Text());
   fileMap.set(KEY_META, new Y.Map<unknown>());
@@ -65,6 +89,30 @@ export function getOrCreateFileEntry(doc: Y.Doc, path: string): Y.Map<unknown> {
     files.set(path, fileMap);
   });
   return fileMap;
+}
+
+/** Chemins présents dans `files` (v2 ou legacy `Y.Text`). */
+export function listCollaborativeFilePaths(doc: Y.Doc): string[] {
+  const out: string[] = [];
+  doc.getMap(FILES_MAP_KEY).forEach((value, path) => {
+    if (typeof path !== "string") return;
+    if (isNoteFileEntry(value) || value instanceof Y.Text) out.push(path);
+  });
+  return out;
+}
+
+/** Passe toutes les entrées `Y.Text` legacy en `{ body, meta }`. */
+export function migrateFilesMapLegacyToV2(doc: Y.Doc, origin?: unknown): number {
+  const files = doc.getMap(FILES_MAP_KEY);
+  let n = 0;
+  for (const [path, value] of files.entries()) {
+    if (typeof path !== "string") continue;
+    if (value instanceof Y.Text) {
+      upgradeLegacyFileEntry(doc, path, value, origin);
+      n += 1;
+    }
+  }
+  return n;
 }
 
 export function getFileEntry(doc: Y.Doc, path: string): Y.Map<unknown> | null {
