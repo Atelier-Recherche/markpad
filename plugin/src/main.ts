@@ -298,6 +298,9 @@ export default class MarkpadPlugin extends Plugin {
   private vaultSyncTimers = new Map<string, ReturnType<typeof window.setTimeout>>();
   /** Évite une boucle vault.modify ↔ syncFolderFilesFromY. */
   private suppressVaultToY = false;
+  private folderSyncInProgress = false;
+  private folderSyncQueued = false;
+  private folderSyncDebounceTimer: ReturnType<typeof window.setTimeout> | null = null;
 
   private applyBodyYToCmHealed(
     cm: import("@codemirror/view").EditorView,
@@ -305,7 +308,7 @@ export default class MarkpadPlugin extends Plugin {
     body: Y.Text
   ): boolean {
     healBodyYTextIfPolluted(doc, body, "markpad-heal-before-cm");
-    return this.applyBodyYToCmHealed(cm, doc, body);
+    return applyYTextToCm(cm, body);
   }
   private fileExplorerObserver: MutationObserver | null = null;
   private fileExplorerObservedEl: HTMLElement | null = null;
@@ -1541,6 +1544,10 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private disconnect(): void {
+    if (this.folderSyncDebounceTimer != null) {
+      window.clearTimeout(this.folderSyncDebounceTimer);
+      this.folderSyncDebounceTimer = null;
+    }
     if (!this.activeRuntime) return;
     if (this.collabReadonlyTimer !== null) {
       window.clearTimeout(this.collabReadonlyTimer);
@@ -2649,10 +2656,19 @@ export default class MarkpadPlugin extends Plugin {
       if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
         return;
       }
-      markpadCollabDebug("folder:Y.Map(files) observe → syncFolderFilesFromY");
-      void this.syncFolderFilesFromY(meta, folderRoot, doc);
+      markpadCollabDebug("folder:Y.Map(files) observe → queueFolderSyncFromY");
+      this.queueFolderSyncFromY(meta, folderRoot, doc);
+    };
+    const onDocUpdate = (_update: Uint8Array, origin: unknown): void => {
+      if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
+        return;
+      }
+      if (origin !== provider) return;
+      markpadCollabDebug("folder:Y.Doc update distant → queueFolderSyncFromY");
+      this.queueFolderSyncFromY(meta, folderRoot, doc);
     };
     filesMap.observe(onFilesChange);
+    doc.on("update", onDocUpdate);
     this.collabWsStatus = provider.wsconnected ? "connected" : "connecting";
     this.activeRuntime = {
       mode: "folder",
@@ -2667,7 +2683,10 @@ export default class MarkpadPlugin extends Plugin {
       folderRoot,
       sharedPaths: meta.paths,
       debugUnload,
-      folderFilesUnload: () => filesMap.unobserve(onFilesChange)
+      folderFilesUnload: () => {
+        filesMap.unobserve(onFilesChange);
+        doc.off("update", onDocUpdate);
+      }
     };
     this.decorateSharedUi();
     // En mode dossier, Yjs est la source de vérité des fragments fichiers :
@@ -2681,7 +2700,7 @@ export default class MarkpadPlugin extends Plugin {
         healBodyYTextIfPolluted(doc, getBodyYText(raw), "markpad-folder-heal-all");
       }
     }
-    void this.syncFolderFilesFromY(meta, folderRoot, doc);
+    this.queueFolderSyncFromY(meta, folderRoot, doc);
     this.updatePresenceInStatusBar(provider);
   }
 
@@ -2718,7 +2737,7 @@ export default class MarkpadPlugin extends Plugin {
         this.activeRuntime?.mode === "folder" &&
         this.activeRuntime.roomId === meta.roomId
       ) {
-        void this.syncFolderFilesFromY(meta, root, this.activeRuntime.doc);
+        this.queueFolderSyncFromY(meta, root, this.activeRuntime.doc);
       }
       this.decorateSharedUi();
       this.refreshSharesPanel();
@@ -2726,15 +2745,31 @@ export default class MarkpadPlugin extends Plugin {
     }
   }
 
+  /** Sync Y → vault (debounce + garde réentrance). Déclenché par files.observe et mises à jour distantes. */
+  private queueFolderSyncFromY(meta: FolderShareMeta, folderRoot: string, doc: Y.Doc): void {
+    if (this.folderSyncDebounceTimer != null) {
+      window.clearTimeout(this.folderSyncDebounceTimer);
+    }
+    this.folderSyncDebounceTimer = window.setTimeout(() => {
+      this.folderSyncDebounceTimer = null;
+      void this.syncFolderFilesFromY(meta, folderRoot, doc);
+    }, 80);
+  }
+
   private async syncFolderFilesFromY(
     meta: FolderShareMeta,
     folderRoot: string,
     doc: Y.Doc
   ): Promise<void> {
+    if (this.folderSyncInProgress) {
+      this.folderSyncQueued = true;
+      return;
+    }
     if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
       markpadCollabDebug("folder:syncFolderFilesFromY skip (pas de runtime dossier actif)");
       return;
     }
+    this.folderSyncInProgress = true;
     const files = doc.getMap("files");
     markpadCollabDebug("folder:syncFolderFilesFromY enter", {
       folderRoot,
@@ -2794,20 +2829,34 @@ export default class MarkpadPlugin extends Plugin {
           }
         } else if (existing instanceof TFile && path === activePath) {
           try {
+            const bodyY = getBodyYText(value);
             const yMeta = metaMapToRecord(getMetaYMap(value));
-            await this.app.fileManager.processFrontMatter(existing, (fm) => {
-              for (const k of Object.keys(fm)) {
-                if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
-                if (!(k in yMeta)) delete fm[k];
+            const onDisk = parseNoteFromMarkdown(await this.app.vault.read(existing));
+            const metaJson = (m: Record<string, unknown>) => JSON.stringify(m);
+            if (metaJson(onDisk.meta) !== metaJson(yMeta)) {
+              await this.app.fileManager.processFrontMatter(existing, (fm) => {
+                for (const k of Object.keys(fm)) {
+                  if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
+                  if (!(k in yMeta)) delete fm[k];
+                }
+                for (const [k, v] of Object.entries(yMeta)) {
+                  fm[k] = v;
+                }
+              });
+              changed = true;
+              markpadCollabDebug("folder:sync meta→FM (fichier actif)", path);
+            }
+            const cm = this.activeRuntime.cmView;
+            if (cm && this.activeRuntime.yText === bodyY) {
+              const cmStr = cm.state.doc.toString();
+              const yStr = bodyY.toString();
+              if (cmStr !== yStr) {
+                this.applyBodyYToCmHealed(cm, doc, bodyY);
+                markpadCollabDebug("folder:sync corps Y→CM (fichier actif, distant)", path);
               }
-              for (const [k, v] of Object.entries(yMeta)) {
-                fm[k] = v;
-              }
-            });
-            changed = true;
-            markpadCollabDebug("folder:sync meta→FM (fichier actif)", path);
+            }
           } catch (e) {
-            markpadCollabDebug("folder:sync meta FM actif échouée", path, e);
+            markpadCollabDebug("folder:sync fichier actif échouée", path, e);
           }
         }
       }
@@ -2857,6 +2906,11 @@ export default class MarkpadPlugin extends Plugin {
       }
     } finally {
       this.suppressVaultToY = false;
+      this.folderSyncInProgress = false;
+      if (this.folderSyncQueued) {
+        this.folderSyncQueued = false;
+        this.queueFolderSyncFromY(meta, folderRoot, doc);
+      }
     }
 
     if (changed) {
