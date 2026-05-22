@@ -1,5 +1,11 @@
 import { URL } from "node:url";
 import * as Y from "yjs";
+import {
+  assembleFileEntry,
+  getOrCreateNoteRoot,
+  hasNoteFileShape,
+  isNoteFileEntry
+} from "@markpad/collab-note";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import * as awarenessProtocol from "y-protocols/awareness";
@@ -258,10 +264,11 @@ export class MarkpadYjsServer {
       let content: string;
       if (filePath !== null) {
         const files = room.doc.getMap("files");
-        const yText = files.get(filePath) as Y.Text | undefined;
-        content = yText ? yText.toString() : "";
+        const entry = files.get(filePath);
+        content = isNoteFileEntry(entry) ? assembleFileEntry(entry) : "";
       } else {
-        content = room.doc.getText("content").toString();
+        const root = getOrCreateNoteRoot(room.doc);
+        content = hasNoteFileShape(root) ? assembleFileEntry(root) : "";
       }
       if (!content.trim()) return;
       insertSnapshot(this.db, { roomId, filePath, content });

@@ -3,18 +3,24 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react
 import { useTranslation } from "react-i18next";
 import { Pencil } from "lucide-react";
 import {
+  applyMetaPatchToYMap,
+  getFileEntry,
+  getMetaYMap,
+  getOrCreateFileEntry,
+  getBodyYText,
+  getCardTitleFromNote,
+  isNoteFileEntry,
+  metaMapToRecord,
+  readMetaNumber,
+  readMetaScalar,
+  readTagsFromMeta
+} from "@markpad/collab-note";
+import {
   fileMatchesBaseFilter,
   KANBAN_ORDER_KEY,
   NO_VALUE_COLUMN,
   type ParsedBaseKanban
 } from "../base/parseBaseFile";
-import {
-  applyFrontmatterPatchToYText,
-  getCardTitle,
-  healNoteYTextIfNeeded,
-  parseFrontmatterRecord,
-  readTagsFromFrontmatter
-} from "../base/patchFrontmatter";
 import { KanbanNoteModal } from "./KanbanNoteModal";
 
 export type KanbanCardModel = {
@@ -27,20 +33,9 @@ export type KanbanCardModel = {
 
 const FILTER_ALL = "__all__";
 
-const readColumn = (raw: string, prop: string): string => {
-  const rec = parseFrontmatterRecord(raw);
-  if (!rec) return NO_VALUE_COLUMN;
-  const v = rec[prop];
-  if (v === undefined || v === null) return NO_VALUE_COLUMN;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (typeof v === "string") return v.trim() || NO_VALUE_COLUMN;
-  return NO_VALUE_COLUMN;
-};
-
-const readOrder = (raw: string): number => {
-  const rec = parseFrontmatterRecord(raw);
-  const o = rec?.[KANBAN_ORDER_KEY];
-  return typeof o === "number" && Number.isFinite(o) ? o : Number.POSITIVE_INFINITY;
+const readColumn = (meta: Record<string, unknown>, prop: string): string => {
+  const v = readMetaScalar(meta, prop);
+  return v ?? NO_VALUE_COLUMN;
 };
 
 const buildColumns = (cards: KanbanCardModel[], stored: string[]): string[] => {
@@ -69,19 +64,21 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
   const [modalPath, setModalPath] = useState<string | null>(null);
 
   const recompute = useCallback(() => {
-    const files = ydoc.getMap<Y.Text>("files");
+    const files = ydoc.getMap("files");
     const next: KanbanCardModel[] = [];
     for (const p of folderPaths) {
       if (!fileMatchesBaseFilter(p, parsed.filterPrefix, folderPaths)) continue;
-      const yt = files.get(p) as Y.Text | undefined;
-      if (!yt) continue;
-      const raw = healNoteYTextIfNeeded(yt);
+      const entry = files.get(p);
+      if (!isNoteFileEntry(entry)) continue;
+      const meta = metaMapToRecord(getMetaYMap(entry));
+      const body = getBodyYText(entry).toString();
+      const order = readMetaNumber(meta, KANBAN_ORDER_KEY) ?? Number.POSITIVE_INFINITY;
       next.push({
         path: p,
-        title: getCardTitle(p, raw),
-        column: readColumn(raw, parsed.groupByProperty),
-        order: readOrder(raw),
-        tags: readTagsFromFrontmatter(raw)
+        title: getCardTitleFromNote(p, meta, body),
+        column: readColumn(meta, parsed.groupByProperty),
+        order,
+        tags: readTagsFromMeta(meta)
       });
     }
     next.sort((a, b) => {
@@ -93,21 +90,25 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
 
   useEffect(() => {
     recompute();
-    const files = ydoc.getMap<Y.Text>("files");
+    const files = ydoc.getMap("files");
     const mapObs = (): void => {
       queueMicrotask(() => recompute());
     };
     files.observe(mapObs);
-    const textObservers: Array<{ text: Y.Text; fn: () => void }> = [];
+    const bodyObservers: Array<{ text: Y.Text; fn: () => void }> = [];
+    const metaObservers: Array<{ map: Y.Map<unknown>; fn: () => void }> = [];
     for (const p of folderPaths) {
       if (!fileMatchesBaseFilter(p, parsed.filterPrefix, folderPaths)) continue;
-      const text = files.get(p);
-      if (!(text instanceof Y.Text)) continue;
+      const entry = getFileEntry(ydoc, p) ?? getOrCreateFileEntry(ydoc, p);
+      const body = getBodyYText(entry);
+      const meta = getMetaYMap(entry);
       const fn = (): void => {
         queueMicrotask(() => recompute());
       };
-      text.observe(fn);
-      textObservers.push({ text, fn });
+      body.observe(fn);
+      meta.observe(fn);
+      bodyObservers.push({ text: body, fn });
+      metaObservers.push({ map: meta, fn });
     }
     const onDocUpdate = (): void => {
       queueMicrotask(() => recompute());
@@ -116,8 +117,11 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     return () => {
       ydoc.off("update", onDocUpdate);
       files.unobserve(mapObs);
-      for (const { text, fn } of textObservers) {
+      for (const { text, fn } of bodyObservers) {
         text.unobserve(fn);
+      }
+      for (const { map, fn } of metaObservers) {
+        map.unobserve(fn);
       }
     };
   }, [ydoc, recompute, folderPaths, parsed.filterPrefix]);
@@ -155,9 +159,8 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
   }, [cards, columns]);
 
   const applyMove = (path: string, targetColumn: string): void => {
-    const files = ydoc.getMap<Y.Text>("files");
-    const yt = files.get(path) as Y.Text | undefined;
-    if (!yt) return;
+    const entry = getFileEntry(ydoc, path);
+    if (!entry) return;
     const colCards = allCards.filter((c) => c.column === targetColumn && c.path !== path);
     const maxOrder = colCards.reduce((acc, c) => Math.max(acc, Number.isFinite(c.order) ? c.order : 0), -1);
     const nextOrder = maxOrder + 1;
@@ -165,12 +168,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
       targetColumn === NO_VALUE_COLUMN
         ? { [parsed.groupByProperty]: undefined, [KANBAN_ORDER_KEY]: nextOrder }
         : { [parsed.groupByProperty]: targetColumn, [KANBAN_ORDER_KEY]: nextOrder };
-    ydoc.transact(() => {
-      const ok = applyFrontmatterPatchToYText(yt, patch);
-      if (!ok) {
-        console.warn("Markpad Kanban: impossible de fusionner le frontmatter (YAML invalide ?).");
-      }
-    });
+    applyMetaPatchToYMap(ydoc, getMetaYMap(entry), patch, "markpad-kanban-dnd");
   };
 
   const onDragStart = (path: string): void => {
@@ -219,72 +217,61 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
             className={`base-kanban__filter-tab${filterTag === tg ? " base-kanban__filter-tab--active" : ""}`}
             onClick={() => setFilterTag(tg)}
           >
-            {tg}
+            #{tg}
           </button>
         ))}
       </div>
       <div className="base-kanban__board">
         {columns.map((col) => (
-          <div
+          <section
             key={col}
             className="base-kanban__column"
-            data-column={col}
             onDragOver={onDragOver}
             onDrop={onDropCol(col)}
           >
-            <header className="base-kanban__col-head">{col}</header>
-            <div className="base-kanban__cards">
-              {(cardsByColumn.get(col) ?? []).map((c) => (
-                <div
-                  key={c.path}
+            <h3 className="base-kanban__column-title">{col}</h3>
+            <ul className="base-kanban__cards">
+              {(cardsByColumn.get(col) ?? []).map((card) => (
+                <li
+                  key={card.path}
+                  className={`base-kanban__card${dragPath === card.path ? " base-kanban__card--dragging" : ""}`}
                   draggable
-                  className={`base-kanban__card${dragPath === c.path ? " base-kanban__card--drag" : ""}`}
-                  title={c.path}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    openEditor(c.path);
-                  }}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/markpad-path", c.path);
-                    e.dataTransfer.effectAllowed = "move";
-                    onDragStart(c.path);
-                  }}
+                  onDragStart={() => onDragStart(card.path)}
                   onDragEnd={onDragEnd}
                 >
                   <div className="base-kanban__card-head">
-                    <span className="base-kanban__card-title">{c.title}</span>
+                    <span className="base-kanban__card-title">{card.title}</span>
                     <button
                       type="button"
                       className="base-kanban__card-edit"
-                      title={t("kanban.editCard")}
-                      aria-label={t("kanban.editCard")}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openEditor(c.path);
-                      }}
+                      title={t("kanban.editNote")}
+                      aria-label={t("kanban.editNote")}
+                      onClick={() => openEditor(card.path)}
                     >
-                      <Pencil size={14} strokeWidth={2} aria-hidden />
+                      <Pencil size={14} aria-hidden />
                     </button>
                   </div>
-                  {c.tags.length > 0 ? (
-                    <div className="base-kanban__card-tags">
-                      {c.tags.map((tg) => (
-                        <span key={`${c.path}:${tg}`} className="base-kanban__tag">
-                          {tg.replace(/^#/, "")}
+                  {card.tags.length > 0 && (
+                    <div className="base-kanban__tags">
+                      {card.tags.map((tg) => (
+                        <span key={tg} className="base-kanban__tag">
+                          #{tg}
                         </span>
                       ))}
                     </div>
-                  ) : null}
-                  <span className="base-kanban__card-path">{c.path.split("/").pop()}</span>
-                </div>
+                  )}
+                </li>
               ))}
-            </div>
-          </div>
+            </ul>
+          </section>
         ))}
       </div>
-      <KanbanNoteModal open={modalPath !== null} path={modalPath} ydoc={ydoc} onClose={() => setModalPath(null)} />
+      <KanbanNoteModal
+        open={modalPath != null}
+        path={modalPath}
+        ydoc={ydoc}
+        onClose={() => setModalPath(null)}
+      />
     </div>
   );
 };

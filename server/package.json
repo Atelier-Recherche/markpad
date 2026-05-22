@@ -11,6 +11,7 @@
     "test-smtp": "tsx scripts/test-smtp.ts"
   },
   "dependencies": {
+    "@markpad/collab-note": "*",
     "better-sqlite3": "^12.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

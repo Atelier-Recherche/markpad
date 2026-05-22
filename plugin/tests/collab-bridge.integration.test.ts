@@ -2,6 +2,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { describe, expect, it, afterEach } from "vitest";
 import * as Y from "yjs";
+import { getNoteBodyYText } from "@markpad/collab-note";
 import { createCollabExtension } from "../src/codemirrorBinding";
 
 /**
@@ -19,7 +20,7 @@ describe("CodeMirror 6 ↔ Y.Text (createCollabExtension)", () => {
   });
 
   function mountEditor(initial: string, ydoc: Y.Doc): EditorView {
-    const yText = ydoc.getText("content");
+    const yText = getNoteBodyYText(ydoc);
     if (yText.length === 0 && initial.length > 0) {
       ydoc.transact(() => yText.insert(0, initial));
     }
@@ -36,7 +37,7 @@ describe("CodeMirror 6 ↔ Y.Text (createCollabExtension)", () => {
 
   it("propage une insertion locale vers Y.Text", () => {
     const ydoc = new Y.Doc();
-    const yText = ydoc.getText("content");
+    const yText = getNoteBodyYText(ydoc);
     const view = mountEditor("hello", ydoc);
     expect(yText.toString()).toBe("hello");
 
@@ -50,7 +51,7 @@ describe("CodeMirror 6 ↔ Y.Text (createCollabExtension)", () => {
 
   it("propage une suppression locale vers Y.Text", () => {
     const ydoc = new Y.Doc();
-    const yText = ydoc.getText("content");
+    const yText = getNoteBodyYText(ydoc);
     const view = mountEditor("abc", ydoc);
     view.dispatch({ changes: { from: 1, to: 2, insert: "" } });
     expect(yText.toString()).toBe("ac");
@@ -58,7 +59,7 @@ describe("CodeMirror 6 ↔ Y.Text (createCollabExtension)", () => {
 
   it("propage une mise à jour Y distante vers le document CM (comme le web)", () => {
     const ydoc = new Y.Doc();
-    const yText = ydoc.getText("content");
+    const yText = getNoteBodyYText(ydoc);
     const view = mountEditor("hi", ydoc);
 
     ydoc.transact(() => {
@@ -69,24 +70,17 @@ describe("CodeMirror 6 ↔ Y.Text (createCollabExtension)", () => {
     expect(view.state.doc.toString()).toBe("remote");
   });
 
-  it("garde le frontmatter + corps alignés (cas note partagée)", () => {
+  it("édite uniquement le corps Y.Text (schéma v2)", () => {
     const ydoc = new Y.Doc();
-    const full = "---\nmarkpadShare: {}\n---\nBody\n";
-    const yText = ydoc.getText("content");
-    ydoc.transact(() => yText.insert(0, full));
-    const state = EditorState.create({
-      doc: full,
-      extensions: createCollabExtension(ydoc, null)
-    });
-    const parent = document.createElement("div");
-    document.body.appendChild(parent);
-    const view = new EditorView({ state, parent });
-    views.push(view);
+    const body = "Body\n";
+    const yText = getNoteBodyYText(ydoc);
+    ydoc.transact(() => yText.insert(0, body));
+    const view = mountEditor(body, ydoc);
 
     view.dispatch({
-      changes: { from: full.length, to: full.length, insert: "More" }
+      changes: { from: body.length, to: body.length, insert: "More" }
     });
 
-    expect(yText.toString()).toBe(`${full}More`);
+    expect(yText.toString()).toBe("Body\nMore");
   });
 });

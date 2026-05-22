@@ -2,11 +2,14 @@ import * as Y from "yjs";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  healNoteYTextIfNeeded,
-  normalizeNoteDocument,
-  patchFrontmatterRecord,
-  readTagsFromFrontmatter
-} from "../base/patchFrontmatter";
+  applyMetaPatchToYMap,
+  getFileEntry,
+  getBodyYText,
+  getMetaYMap,
+  metaMapToRecord,
+  readTagsFromMeta,
+  setBodyYTextContent
+} from "@markpad/collab-note";
 
 const TAG_SPLIT = /[,;\s#]+/g;
 
@@ -29,17 +32,17 @@ export type KanbanNoteModalProps = {
 
 export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalProps) => {
   const { t } = useTranslation();
-  const [fullText, setFullText] = useState("");
+  const [bodyText, setBodyText] = useState("");
   const [tagsInput, setTagsInput] = useState("");
 
   const refreshFromY = useCallback(() => {
     if (!path) return;
-    const files = ydoc.getMap<Y.Text>("files");
-    const yt = files.get(path);
-    if (!(yt instanceof Y.Text)) return;
-    const raw = healNoteYTextIfNeeded(yt);
-    setFullText(raw);
-    setTagsInput(readTagsFromFrontmatter(raw).join(", "));
+    const entry = getFileEntry(ydoc, path);
+    if (!entry) return;
+    const body = getBodyYText(entry).toString();
+    const meta = metaMapToRecord(getMetaYMap(entry));
+    setBodyText(body);
+    setTagsInput(readTagsFromMeta(meta).join(", "));
   }, [path, ydoc]);
 
   useEffect(() => {
@@ -61,23 +64,21 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
 
   const save = (): void => {
     if (!path) return;
-    const files = ydoc.getMap<Y.Text>("files");
-    const yt = files.get(path);
-    if (!(yt instanceof Y.Text)) return;
+    const entry = getFileEntry(ydoc, path);
+    if (!entry) return;
     const tags = parseTagsFromInput(tagsInput);
-    const base = normalizeNoteDocument(fullText);
-    const merged = patchFrontmatterRecord(base, {
-      tags: tags.length ? tags : undefined,
-      tag: undefined
-    });
-    const doc = yt.doc;
-    const write = (): void => {
-      const len = yt.length;
-      if (len > 0) yt.delete(0, len);
-      yt.insert(0, merged);
-    };
-    if (doc) doc.transact(write, "markpad-kanban-modal");
-    else write();
+    const body = getBodyYText(entry);
+    const meta = getMetaYMap(entry);
+    setBodyYTextContent(ydoc, body, bodyText, "markpad-kanban-modal");
+    applyMetaPatchToYMap(
+      ydoc,
+      meta,
+      {
+        tags: tags.length ? tags : undefined,
+        tag: undefined
+      },
+      "markpad-kanban-modal"
+    );
     onClose();
   };
 
@@ -128,8 +129,8 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
             id="kanban-modal-body"
             className="kanban-modal__textarea"
             spellCheck={false}
-            value={fullText}
-            onChange={(e) => setFullText(e.target.value)}
+            value={bodyText}
+            onChange={(e) => setBodyText(e.target.value)}
             rows={18}
           />
         </div>

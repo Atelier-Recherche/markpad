@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.3.4",
+    "@markpad/collab-note": "*",
     "codemirror": "^6.0.2",
     "diff": "^8.0.4",
     "i18next": "^26.0.1",
@@ -40,7 +41,7 @@
     "vite": "^8.0.1"
   },
   "optionalDependencies": {
-    "@rolldown/binding-win32-x64-msvc": "^1.0.0-rc.12",
+    "@rolldown/binding-win32-x64-msvc": "^1.0.2",
     "lightningcss-win32-x64-msvc": "^1.32.0"
   }
 }

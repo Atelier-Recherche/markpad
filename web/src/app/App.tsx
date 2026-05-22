@@ -32,7 +32,17 @@ import {
 } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { createCollabEditor, type CollabRuntime } from "../collab/editor";
-import { getFrontmatterPrefixLength } from "../collab/frontmatter";
+import {
+  assembleFileEntry,
+  assembleNoteToMarkdown,
+  getFileEntry,
+  getMetaYMap,
+  getNoteMetaYMap,
+  getOrCreateNoteRoot,
+  getBodyYText,
+  hasNoteFileShape,
+  metaMapToRecord
+} from "@markpad/collab-note";
 import { SUPPORTED_LOCALES, setLocale, type SupportedLocale } from "../i18n/index";
 import { FileTreePanel } from "./FileTreePanel";
 import { HistoryPanel } from "./HistoryPanel";
@@ -143,6 +153,8 @@ export const App = () => {
   const [folderPaths, setFolderPaths] = useState<string[]>([]);
   const [folderRootPrefix, setFolderRootPrefix] = useState("");
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  /** Rafraîchit l’aperçu quand le meta Yjs change sans toucher au corps. */
+  const [yPreviewRevision, setYPreviewRevision] = useState(0);
 
   const showEditor = viewMode === "edit" || viewMode === "split";
   const showPreview = viewMode === "preview" || viewMode === "split";
@@ -380,13 +392,37 @@ export const App = () => {
   }, [hideFrontmatter, runtime]);
 
   useEffect(() => {
+    if (!runtime?.doc) return;
+    const bump = (): void => setYPreviewRevision((n) => n + 1);
+    runtime.doc.on("update", bump);
+    return () => {
+      runtime.doc.off("update", bump);
+    };
+  }, [runtime]);
+
+  useEffect(() => {
     runtime?.setLineNumbersVisible(showLineNumbers);
   }, [showLineNumbers, runtime]);
 
   const { renderedMarkdown, toc } = useMemo(() => {
-    const fmLen = getFrontmatterPrefixLength(markdown);
-    const body =
-      hideFrontmatter && fmLen != null ? markdown.slice(fmLen) : markdown;
+    let body = markdown;
+    if (!hideFrontmatter && runtime?.doc) {
+      const doc = runtime.doc;
+      if (folderMode && activeFilePath) {
+        const entry = getFileEntry(doc, activeFilePath);
+        if (entry) {
+          body = assembleFileEntry(entry);
+        }
+      } else {
+        const root = getOrCreateNoteRoot(doc);
+        if (hasNoteFileShape(root)) {
+          body = assembleNoteToMarkdown(
+            getBodyYText(root).toString(),
+            metaMapToRecord(getNoteMetaYMap(doc))
+          );
+        }
+      }
+    }
     const lines = body.split("\n");
     const items: TocItem[] = [];
     const slugCount = new Map<string, number>();
@@ -444,7 +480,15 @@ export const App = () => {
       html = stripHtmlTables(html);
     }
     return { renderedMarkdown: html, toc: items };
-  }, [markdown, hideFrontmatter, moduleFeatures.markdownTables]);
+  }, [
+    markdown,
+    hideFrontmatter,
+    moduleFeatures.markdownTables,
+    runtime,
+    folderMode,
+    activeFilePath,
+    yPreviewRevision
+  ]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -503,7 +547,15 @@ export const App = () => {
     setName(trimmed);
   };
 
-  const hasFrontmatter = getFrontmatterPrefixLength(markdown) != null;
+  const hasFrontmatter = useMemo(() => {
+    if (!runtime?.doc) return false;
+    if (folderMode && activeFilePath) {
+      const entry = getFileEntry(runtime.doc, activeFilePath);
+      if (!entry) return false;
+      return Object.keys(metaMapToRecord(getMetaYMap(entry))).length > 0;
+    }
+    return Object.keys(metaMapToRecord(getNoteMetaYMap(runtime.doc))).length > 0;
+  }, [runtime, folderMode, activeFilePath, yPreviewRevision]);
 
   const showJoinUi = joinGate === "password" || joinGate === "missing" || joinGate === "error";
   const showChecking = joinGate === "checking";

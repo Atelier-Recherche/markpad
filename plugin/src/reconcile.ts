@@ -18,31 +18,25 @@ export type ReconcileStatus =
   | "conflict";
 
 /**
- * Fusionne le Markdown local (fichier Obsidian) dans Y.Text après sync réseau.
- *
- * Logique :
- * - Y.Text vide + local non vide → on remplit Y depuis le local ("seed").
- * - Les deux non vides → diff-match-patch pour appliquer les changements locaux sur Y.
- *   Si TOUS les hunks s'appliquent proprement → "merged".
- *   Si au moins un hunk échoue (conflit de zones) → "conflict" (Y.Text non touché).
+ * Fusionne le corps Markdown local (sans frontmatter) dans Y.Text `body` après sync réseau.
  */
-export const reconcileLocalMarkdownIntoY = (
+export const reconcileLocalBodyIntoY = (
   doc: Y.Doc,
   yText: Y.Text,
-  localFull: string
+  localBody: string
 ): ReconcileStatus => {
   const yStr = yText.toString();
-  if (localFull === yStr) return "noop";
+  if (localBody === yStr) return "noop";
 
-  if (yStr.length === 0 && localFull.length > 0) {
-    doc.transact(() => yText.insert(0, localFull), RECONCILE_ORIGIN);
+  if (yStr.length === 0 && localBody.length > 0) {
+    doc.transact(() => yText.insert(0, localBody), RECONCILE_ORIGIN);
     return "seeded";
   }
 
-  if (localFull.length === 0) return "noop";
+  if (localBody.length === 0) return "noop";
 
   const dmp = new DiffMatchPatch();
-  const patches = dmp.patch_make(yStr, localFull);
+  const patches = dmp.patch_make(yStr, localBody);
   const [merged, results] = dmp.patch_apply(patches, yStr);
 
   if (!results.every(Boolean)) {

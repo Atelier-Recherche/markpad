@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
+const rootDir = path.join(import.meta.dirname, "..");
+const collabNoteEntry = path.join(rootDir, "packages/collab-note/dist/index.js");
 const lib0Root = path.dirname(require.resolve("lib0/package.json"));
 const lib0WebcryptoBrowserEntry = path.join(lib0Root, "webcrypto.js");
 const watch = process.argv.includes("--watch");
@@ -19,6 +21,9 @@ const ySingletonPlugin = {
     }));
     build.onResolve({ filter: /^lib0\/webcrypto\.node(\.js)?$/ }, () => ({
       path: lib0WebcryptoBrowserEntry
+    }));
+    build.onResolve({ filter: /^@markpad\/collab-note$/ }, () => ({
+      path: collabNoteEntry
     }));
   }
 };

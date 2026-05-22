@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
+    "packages/collab-note",
     "plugin",
     "server",
     "web"
   ],
   "scripts": {
-    "build": "npm run -w server build && npm run -w web build && npm run -w plugin build",
+    "build": "npm run -w @markpad/collab-note build && npm run -w server build && npm run -w web build && npm run -w plugin build",
     "lint": "npm run -w server lint && npm run -w web lint && npm run -w plugin lint",
     "dev:server": "npm run -w server dev",
     "dev:web": "npm run -w web dev",

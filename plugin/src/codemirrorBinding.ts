@@ -5,6 +5,7 @@ import { setIcon } from "obsidian";
 import type { MarkdownView } from "obsidian";
 import { yCollab, ySyncFacet } from "y-codemirror.next";
 import * as Y from "yjs";
+import { getNoteBodyYText } from "@markpad/collab-note";
 import { applyMinimalYTextEdit } from "./applyMinimalYTextEdit";
 import { markpadCollabDebug } from "./markpadDebug";
 
@@ -113,7 +114,7 @@ class MarkpadCmYBridge {
 const markpadCmYBridge = ViewPlugin.fromClass(MarkpadCmYBridge);
 
 export const createCollabExtension = (doc: Y.Doc, awareness: unknown): Extension[] => {
-  const yText = doc.getText("content");
+  const yText = getNoteBodyYText(doc);
   return createCollabExtensionForYText(yText, awareness);
 };
 

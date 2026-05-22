@@ -1,13 +1,17 @@
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
-import { EditorSelection, EditorState, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, placeholder } from "@codemirror/view";
+import { EditorState } from "@codemirror/state";
+import { EditorView, placeholder } from "@codemirror/view";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yCollab } from "y-codemirror.next";
 import { basicSetup } from "codemirror";
+import {
+  getNoteBodyYText,
+  getOrCreateFileEntry,
+  getBodyYText
+} from "@markpad/collab-note";
 import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbound";
 import { extractPresence } from "./presence";
-import { getFrontmatterPrefixLength } from "./frontmatter";
 import * as mdFmt from "./markdownFormat";
 import { createLivePreviewExtension } from "./livePreview/index";
 
@@ -16,6 +20,7 @@ export interface CollabRuntime {
   provider: WebsocketProvider;
   /** Présent après la première sync Yjs. */
   view: EditorView | null;
+  /** Corps seul dans Yjs v2 ; le pliage FM n’a plus d’effet (conservé pour l’API). */
   setFrontmatterFolded: (folded: boolean) => void;
   setLineNumbersVisible: (visible: boolean) => void;
   setLocalDisplayName: (name: string) => void;
@@ -70,75 +75,16 @@ const markpadCmTheme = EditorView.theme(
   }
 );
 
-const setFrontmatterHidden = StateEffect.define<boolean>();
-
-const frontmatterHiddenField = StateField.define<{
-  hidden: boolean;
-  decorations: DecorationSet;
-}>({
-  create: () => ({
-    hidden: false,
-    decorations: Decoration.none
-  }),
-  update: (value, tr) => {
-    let hidden = value.hidden;
-    for (const fx of tr.effects) {
-      if (fx.is(setFrontmatterHidden)) {
-        hidden = fx.value;
-      }
-    }
-    if (!tr.docChanged && hidden === value.hidden) {
-      return value;
-    }
-    if (!hidden) {
-      return { hidden, decorations: Decoration.none };
-    }
-    const len = getFrontmatterPrefixLength(tr.state.doc.toString());
-    if (len == null || len <= 0) {
-      return { hidden, decorations: Decoration.none };
-    }
-    return {
-      hidden,
-      decorations: Decoration.set([Decoration.replace({ inclusive: false }).range(0, len)])
-    };
-  },
-  provide: (f) => [
-    EditorView.decorations.from(f, (v) => v.decorations),
-    // Empêcher le curseur d'entrer dans la plage frontmatter lorsqu'elle est masquée.
-    // Decoration.replace cache visuellement mais ne bloque pas la navigation clavier.
-    EditorState.transactionFilter.of((tr) => {
-      const field = tr.startState.field(frontmatterHiddenField);
-      if (!field.hidden) return tr;
-      const len = getFrontmatterPrefixLength(tr.state.doc.toString());
-      if (len == null || len <= 0) return tr;
-      const sel = tr.newSelection;
-      const clamp = (pos: number) => Math.max(pos, len);
-      const anchor = clamp(sel.main.anchor);
-      const head = clamp(sel.main.head);
-      if (anchor === sel.main.anchor && head === sel.main.head) return tr;
-      return [tr, { selection: EditorSelection.single(anchor, head) }];
-    })
-  ]
-});
-
-const resolveYText = (
+const resolveBodyYText = (
   ydoc: Y.Doc,
   folderPaths: string[] | undefined,
   activeFilePath: string | null | undefined
 ): Y.Text => {
   const path = activeFilePath;
   if (folderPaths?.length && path) {
-    const files = ydoc.getMap("files");
-    let fragment = files.get(path) as Y.Text | undefined;
-    if (!fragment) {
-      fragment = new Y.Text();
-      ydoc.transact(() => {
-        files.set(path, fragment!);
-      });
-    }
-    return fragment;
+    return getBodyYText(getOrCreateFileEntry(ydoc, path));
   }
-  return ydoc.getText("content");
+  return getNoteBodyYText(ydoc);
 };
 
 export const createCollabEditor = (input: {
@@ -160,6 +106,7 @@ export const createCollabEditor = (input: {
   /** Aperçu live éditeur : surlignage des tableaux GFM (défaut true). */
   markdownTables?: boolean;
 }): CollabRuntime => {
+  void input.initialHideFrontmatter;
   const ydoc = new Y.Doc();
 
   const provider = new WebsocketProvider(`${input.wsBaseUrl}/ws`, input.roomId, ydoc, {
@@ -202,11 +149,10 @@ export const createCollabEditor = (input: {
   let yText: Y.Text | null = null;
   let cursorInterval = 0;
   let onSel: (() => void) | null = null;
-  let setFrontmatterVisibility: (hidden: boolean) => void = () => {};
 
   const buildEditor = (): void => {
     if (view) return;
-    yText = resolveYText(ydoc, input.folderPaths, input.activeFilePath);
+    yText = resolveBodyYText(ydoc, input.folderPaths, input.activeFilePath);
 
     type YCollabUiOpts = {
       getUserColor?: (u: { color?: string }) => string;
@@ -255,7 +201,6 @@ export const createCollabEditor = (input: {
           basicSetup,
           markdown({ base: markdownLanguage }),
           markpadCmTheme,
-          frontmatterHiddenField,
           createLivePreviewExtension({
             tables: input.markdownTables !== false
           }),
@@ -278,17 +223,6 @@ export const createCollabEditor = (input: {
     const showLineNumbers = input.initialShowLineNumbers !== false;
     if (!showLineNumbers) {
       root.classList.add("markpad-cm-root--no-linenum");
-    }
-
-    setFrontmatterVisibility = (hidden: boolean): void => {
-      if (!view) return;
-      view.dispatch({
-        effects: setFrontmatterHidden.of(hidden)
-      });
-    };
-
-    if (input.initialHideFrontmatter) {
-      requestAnimationFrame(() => setFrontmatterVisibility(true));
     }
 
     cursorInterval = window.setInterval(() => {
@@ -315,8 +249,8 @@ export const createCollabEditor = (input: {
     get view(): EditorView | null {
       return view;
     },
-    setFrontmatterFolded: (folded: boolean) => {
-      setFrontmatterVisibility(folded);
+    setFrontmatterFolded: () => {
+      /* Yjs v2 : le corps est dans body, le YAML dans meta — pas de masquage CM. */
     },
     setLineNumbersVisible: (visible: boolean) => {
       root?.classList.toggle("markpad-cm-root--no-linenum", !visible);
