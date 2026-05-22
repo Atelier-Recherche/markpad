@@ -104,7 +104,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     const mapObs = (): void => {
       queueMicrotask(() => recompute());
     };
-    files.observeDeep(mapObs);
+    files.observe(mapObs);
     const bodyObservers: Array<{ text: Y.Text; fn: () => void }> = [];
     const metaObservers: Array<{ map: Y.Map<unknown>; fn: () => void }> = [];
     for (const p of pathsToScan) {
@@ -126,7 +126,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     ydoc.on("update", onDocUpdate);
     return () => {
       ydoc.off("update", onDocUpdate);
-      files.unobserveDeep(mapObs);
+      files.unobserve(mapObs);
       for (const { text, fn } of bodyObservers) {
         text.unobserve(fn);
       }
@@ -188,7 +188,6 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
         ? { [parsed.groupByProperty]: undefined, [KANBAN_ORDER_KEY]: nextOrder }
         : { [parsed.groupByProperty]: targetColumn, [KANBAN_ORDER_KEY]: nextOrder };
     applyMetaPatchToYMap(ydoc, getMetaYMap(entry), patch, "markpad-kanban-dnd");
-    recompute();
   };
 
   const onDragStart = (path: string): void => {
