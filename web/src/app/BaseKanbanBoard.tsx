@@ -9,7 +9,6 @@ import {
   getOrCreateFileEntry,
   getBodyYText,
   getCardTitleFromNote,
-  getFileEntry,
   isNoteFileEntry,
   listCollaborativeFilePaths,
   metaMapToRecord,

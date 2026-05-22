@@ -130,6 +130,7 @@ switch ($Target) {
       Invoke-Step "Rebuild + restart du service server uniquement" "docker compose up --build -d server"
     }
     if ($DeployPluginAfterServiceBuild) {
+      Invoke-Step "Build @markpad/collab-note" "npm run -w @markpad/collab-note build"
       Invoke-Step "Build du plugin" "npm run -w plugin build"
       Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
     }
@@ -141,11 +142,13 @@ switch ($Target) {
       Invoke-Step "Rebuild + restart du service web uniquement" "docker compose up --build -d web"
     }
     if ($DeployPluginAfterServiceBuild) {
+      Invoke-Step "Build @markpad/collab-note" "npm run -w @markpad/collab-note build"
       Invoke-Step "Build du plugin" "npm run -w plugin build"
       Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
     }
   }
   "plugin" {
+    Invoke-Step "Build @markpad/collab-note" "npm run -w @markpad/collab-note build"
     Invoke-Step "Build du plugin" "npm run -w plugin build"
     Deploy-PluginToVaults -RootPath $scriptRoot -PrimaryVaultPath $VaultPluginsPath -ExtraVaultPaths $AdditionalVaultPluginsPaths -PluginName $PluginId
   }
