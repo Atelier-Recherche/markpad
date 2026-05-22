@@ -2071,20 +2071,7 @@ export default class MarkpadPlugin extends Plugin {
         // ignore
       }
       this.folderSharesMeta.delete(folderRoot);
-      const anchor = this.app.vault.getAbstractFileByPath(meta.anchorPath);
-      if (anchor instanceof TFile) {
-        try {
-          await this.app.vault.delete(anchor);
-        } catch {
-          try {
-            await this.app.fileManager.processFrontMatter(anchor, (fm) => {
-              delete fm[FOLDER_SHARE_FM];
-            });
-          } catch {
-            // ignore
-          }
-        }
-      }
+      await this.deleteFolderShareAnchorAtPath(meta.anchorPath);
     } else {
       try {
         await this.ensureFolderAnchorFile(meta.anchorPath, meta, meta.paths);
@@ -2113,14 +2100,9 @@ export default class MarkpadPlugin extends Plugin {
    * donc on ne peut pas compter sur getFileCache(). On lit le fichier et on parse le YAML manuellement.
    */
   /**
-   * Reconstruit folderSharesMeta en scannant le système de fichiers via vault.adapter.list().
-   * vault.getFiles() peut exclure les fichiers dont le nom commence par '.' ;
-   * l'adapter contourne cette restriction en lisant directement le disque.
+   * Liste les chemins `.markpad-folder-share.md` via vault.adapter (fichiers `.*` souvent absents de getFiles()).
    */
-  private async rebuildFolderSharesFromFiles(): Promise<void> {
-    this.folderSharesMeta.clear();
-
-    // Collecte récursive des chemins d'ancres via le filesystem réel.
+  private async collectFolderShareAnchorPaths(): Promise<string[]> {
     const anchorPaths: string[] = [];
     const scanDir = async (dir: string): Promise<void> => {
       try {
@@ -2131,12 +2113,66 @@ export default class MarkpadPlugin extends Plugin {
         }
         for (const fd of listed.folders) {
           const name = fd.includes("/") ? fd.slice(fd.lastIndexOf("/") + 1) : fd;
-          if (name === ".obsidian") continue; // jamais d'ancre dans .obsidian
+          if (name === ".obsidian") continue;
           await scanDir(fd);
         }
       } catch { /* répertoire inaccessible ou non listé */ }
     };
     await scanDir("");
+    return anchorPaths;
+  }
+
+  /**
+   * Supprime le fichier ancre de partage dossier (vault + adaptateur).
+   * Les fichiers commençant par '.' ne sont pas toujours des TFile : sans adapter.remove,
+   * rebuildFolderSharesFromFiles les recharge au prochain démarrage.
+   */
+  private async deleteFolderShareAnchorAtPath(anchorPath: string): Promise<void> {
+    const pathNorm = normalizePath(anchorPath);
+    const anchor = this.app.vault.getAbstractFileByPath(pathNorm);
+    if (anchor instanceof TFile) {
+      try {
+        await this.app.vault.delete(anchor);
+        return;
+      } catch {
+        // TFile présent mais delete impossible → essai adaptateur
+      }
+    }
+    try {
+      if (await this.app.vault.adapter.exists(pathNorm)) {
+        await this.app.vault.adapter.remove(pathNorm);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      if (await this.app.vault.adapter.exists(pathNorm)) {
+        await this.app.vault.adapter.write(pathNorm, "---\n---\n");
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    if (anchor instanceof TFile) {
+      try {
+        await this.app.fileManager.processFrontMatter(anchor, (fm) => {
+          delete fm[FOLDER_SHARE_FM];
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /**
+   * Reconstruit folderSharesMeta en scannant le système de fichiers via vault.adapter.list().
+   * vault.getFiles() peut exclure les fichiers dont le nom commence par '.' ;
+   * l'adapter contourne cette restriction en lisant directement le disque.
+   */
+  private async rebuildFolderSharesFromFiles(): Promise<void> {
+    this.folderSharesMeta.clear();
+    const anchorPaths = await this.collectFolderShareAnchorPaths();
 
     for (const anchorPath of anchorPaths) {
       try {
@@ -2827,16 +2863,8 @@ export default class MarkpadPlugin extends Plugin {
     for (const root of roots) {
       await this.stopSharingFolderByPath(root);
     }
-    const orphans: TFile[] = [];
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      if (f.name === FOLDER_SHARE_FILENAME) orphans.push(f);
-    }
-    for (const f of orphans) {
-      try {
-        await this.app.vault.delete(f);
-      } catch {
-        // ignore
-      }
+    for (const anchorPath of await this.collectFolderShareAnchorPaths()) {
+      await this.deleteFolderShareAnchorAtPath(anchorPath);
     }
     this.folderSharesMeta.clear();
     this.rebuildSharedNotesFromFrontmatter();
@@ -2938,19 +2966,10 @@ export default class MarkpadPlugin extends Plugin {
         this.sharedNotes.delete(p);
       }
       this.folderSharesMeta.delete(folderRootPath);
-      const anchor = this.app.vault.getAbstractFileByPath(meta.anchorPath);
-      if (anchor instanceof TFile) {
-        try {
-          await this.app.vault.delete(anchor);
-        } catch {
-          try {
-            await this.app.fileManager.processFrontMatter(anchor, (fm) => {
-              delete fm[FOLDER_SHARE_FM];
-            });
-          } catch (e2) {
-            new Notice(`Markpad: nettoyage du fichier ancre impossible — ${(e2 as Error).message}`);
-          }
-        }
+      try {
+        await this.deleteFolderShareAnchorAtPath(meta.anchorPath);
+      } catch (e2) {
+        new Notice(`Markpad: nettoyage du fichier ancre impossible — ${(e2 as Error).message}`);
       }
       this.decorateSharedUi();
       this.refreshSharesPanel();

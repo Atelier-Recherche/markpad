@@ -37,6 +37,7 @@ export interface CollabRuntime {
   formatHr: () => void;
   /** Recalcule la mise en page CodeMirror (p.ex. après changement de panneau). */
   refreshLayout: () => void;
+  switchActiveFile: (activeFilePath: string | null, folderPaths?: string[]) => void;
   destroy: () => void;
 }
 
@@ -149,10 +150,27 @@ export const createCollabEditor = (input: {
   let yText: Y.Text | null = null;
   let cursorInterval = 0;
   let onSel: (() => void) | null = null;
+  let folderPathsRef = input.folderPaths;
+  let activeFilePathRef = input.activeFilePath ?? null;
 
-  const buildEditor = (): void => {
-    if (view) return;
-    yText = resolveBodyYText(ydoc, input.folderPaths, input.activeFilePath);
+  const teardownCursor = (): void => {
+    if (cursorInterval) {
+      window.clearInterval(cursorInterval);
+      cursorInterval = 0;
+    }
+    if (onSel) {
+      document.removeEventListener("selectionchange", onSel);
+      onSel = null;
+    }
+  };
+
+  const mountEditorView = (): void => {
+    if (!yText || !root) return;
+    teardownCursor();
+    if (view) {
+      view.destroy();
+      view = null;
+    }
 
     type YCollabUiOpts = {
       getUserColor?: (u: { color?: string }) => string;
@@ -187,11 +205,6 @@ export const createCollabEditor = (input: {
     };
 
     const initial = yText.length > 0 ? yText.toString() : "";
-
-    input.parent.innerHTML = "";
-    root = document.createElement("div");
-    root.className = "markpad-cm-root";
-    input.parent.appendChild(root);
 
     view = new EditorView({
       parent: root,
@@ -233,6 +246,31 @@ export const createCollabEditor = (input: {
       if (view) pushCursor(view);
     };
     document.addEventListener("selectionchange", onSel);
+  };
+
+  const buildEditor = (): void => {
+    if (view) return;
+    yText = resolveBodyYText(ydoc, folderPathsRef, activeFilePathRef);
+    input.parent.innerHTML = "";
+    root = document.createElement("div");
+    root.className = "markpad-cm-root";
+    input.parent.appendChild(root);
+    mountEditorView();
+  };
+
+  const switchActiveFile = (
+    activeFilePath: string | null,
+    folderPaths?: string[]
+  ): void => {
+    if (folderPaths !== undefined) folderPathsRef = folderPaths;
+    activeFilePathRef = activeFilePath;
+    if (!provider.synced) return;
+    yText = resolveBodyYText(ydoc, folderPathsRef, activeFilePathRef);
+    if (!root) {
+      buildEditor();
+      return;
+    }
+    mountEditorView();
   };
 
   if (provider.synced) {
@@ -281,6 +319,7 @@ export const createCollabEditor = (input: {
         view.requestMeasure();
       }
     },
+    switchActiveFile,
     destroy: () => {
       window.clearInterval(cursorInterval);
       if (onSel) document.removeEventListener("selectionchange", onSel);

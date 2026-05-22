@@ -364,16 +364,23 @@ export const App = () => {
     wsBaseUrl,
     password,
     stableUserId,
-    folderMode,
-    folderPaths,
-    activeFilePath,
-    hideFrontmatter,
-    showLineNumbers,
-    displayName,
     editorMountSurface,
     viewMode,
     moduleFeatures.markdownTables
   ]);
+
+  const prevFolderFileRef = useRef<string | null>(null);
+  useEffect(() => {
+    prevFolderFileRef.current = null;
+  }, [roomId]);
+
+  /** Changement de fichier dossier sans recréer le WebSocket (évite connect/disconnect en boucle). */
+  useEffect(() => {
+    if (!runtime || !folderMode) return;
+    if (prevFolderFileRef.current === activeFilePath) return;
+    prevFolderFileRef.current = activeFilePath;
+    runtime.switchActiveFile(activeFilePath, folderPaths);
+  }, [runtime, folderMode, activeFilePath, folderPaths]);
 
   useEffect(() => {
     if (!runtime) return;
@@ -406,7 +413,14 @@ export const App = () => {
         for (const p of prev) {
           if (inShare(p) && !fromY.includes(p)) next.delete(p);
         }
-        return [...next].sort((a, b) => a.localeCompare(b));
+        const sorted = [...next].sort((a, b) => a.localeCompare(b));
+        if (
+          prev.length === sorted.length &&
+          prev.every((p, i) => p === sorted[i])
+        ) {
+          return prev;
+        }
+        return sorted;
       });
       setActiveFilePath((prev) => {
         if (prev && fromY.includes(prev)) return prev;
@@ -421,13 +435,8 @@ export const App = () => {
       queueMicrotask(syncFromY);
     };
     files.observe(obs);
-    const onDoc = (): void => {
-      queueMicrotask(syncFromY);
-    };
-    doc.on("update", onDoc);
     return () => {
       files.unobserve(obs);
-      doc.off("update", onDoc);
     };
   }, [folderMode, runtime, folderRootPrefix, moduleFeatures.kanban]);
 
