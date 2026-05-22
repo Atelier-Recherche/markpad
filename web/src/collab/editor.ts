@@ -8,7 +8,8 @@ import { basicSetup } from "codemirror";
 import {
   getNoteBodyYText,
   getOrCreateFileEntry,
-  getBodyYText
+  getBodyYText,
+  healBodyYTextIfPolluted
 } from "@markpad/collab-note";
 import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbound";
 import { extractPresence } from "./presence";
@@ -254,6 +255,7 @@ export const createCollabEditor = (input: {
   const buildEditor = (): void => {
     if (view) return;
     yText = resolveBodyYText(ydoc, folderPathsRef, activeFilePathRef);
+    healBodyYTextIfPolluted(ydoc, yText, "markpad-web-heal");
     hostParent.innerHTML = "";
     root = document.createElement("div");
     root.className = "markpad-cm-root";
@@ -278,6 +280,7 @@ export const createCollabEditor = (input: {
     activeFilePathRef = activeFilePath;
     if (!provider.synced) return;
     yText = resolveBodyYText(ydoc, folderPathsRef, activeFilePathRef);
+    healBodyYTextIfPolluted(ydoc, yText, "markpad-web-heal");
     if (!root) {
       buildEditor();
       return;

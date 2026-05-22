@@ -5,6 +5,7 @@ import {
   OBSIDIAN_ONLY_META_KEYS
 } from "./noteDocument.js";
 import { readTagsFromMeta, patchMetaRecord } from "./meta.js";
+import { stripEmbeddedFrontmatterFromBody } from "./sanitizeBody.js";
 
 describe("parseNoteFromMarkdown / assembleNoteToMarkdown", () => {
   it("round-trip avec tags et kanban", () => {
@@ -50,6 +51,24 @@ Body
     const parsed = parseNoteFromMarkdown("Just text\n");
     expect(parsed.meta).toEqual({});
     expect(parsed.body).toBe("Just text\n");
+  });
+
+  it("retire un bloc YAML dupliqué dans le corps", () => {
+    const polluted = `qsdqsd ok..---
+status: A faire
+kanban_order: 0
+file.folder: autre
+---
+suite`;
+    const clean = stripEmbeddedFrontmatterFromBody(polluted);
+    expect(clean).toBe("qsdqsd ok..suite");
+    const assembled = assembleNoteToMarkdown(clean, {
+      status: "A faire",
+      kanban_order: 0,
+      "file.folder": "autre"
+    });
+    expect(assembled.match(/^---/gm)?.length).toBe(1);
+    expect(assembled).toContain("qsdqsd ok..suite");
   });
 });
 

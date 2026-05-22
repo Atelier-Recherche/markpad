@@ -9,12 +9,14 @@ import {
   getOrCreateFileEntry,
   getBodyYText,
   getCardTitleFromNote,
+  getFileEntry,
   isNoteFileEntry,
   listCollaborativeFilePaths,
   metaMapToRecord,
   readMetaNumber,
   readMetaScalar,
-  readTagsFromMeta
+  readTagsFromMeta,
+  upgradeLegacyFileEntry
 } from "@markpad/collab-note";
 import {
   fileMatchesBaseFilter,
@@ -74,8 +76,10 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     const next: KanbanCardModel[] = [];
     for (const p of pathsToScan) {
       if (!fileMatchesBaseFilter(p, parsed.filterPrefix, pathsToScan)) continue;
-      let entry = files.get(p);
-      if (entry instanceof Y.Text) continue;
+      let entry: unknown = files.get(p);
+      if (entry instanceof Y.Text) {
+        entry = upgradeLegacyFileEntry(ydoc, p, entry, "markpad-kanban-upgrade");
+      }
       if (!isNoteFileEntry(entry)) continue;
       const meta = metaMapToRecord(getMetaYMap(entry));
       const body = getBodyYText(entry).toString();
@@ -165,9 +169,18 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     return m;
   }, [cards, columns]);
 
+  const resolveEntry = (path: string): ReturnType<typeof getFileEntry> => {
+    const files = ydoc.getMap("files");
+    const raw = files.get(path);
+    if (raw instanceof Y.Text) {
+      return upgradeLegacyFileEntry(ydoc, path, raw, "markpad-kanban-dnd");
+    }
+    return getFileEntry(ydoc, path) ?? getOrCreateFileEntry(ydoc, path);
+  };
+
   const applyMove = (path: string, targetColumn: string): void => {
-    const entry = getFileEntry(ydoc, path);
-    if (!entry) return;
+    const entry = resolveEntry(path);
+    if (!isNoteFileEntry(entry)) return;
     const colCards = allCards.filter((c) => c.column === targetColumn && c.path !== path);
     const maxOrder = colCards.reduce((acc, c) => Math.max(acc, Number.isFinite(c.order) ? c.order : 0), -1);
     const nextOrder = maxOrder + 1;
@@ -243,7 +256,11 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
                   key={card.path}
                   className={`base-kanban__card${dragPath === card.path ? " base-kanban__card--dragging" : ""}`}
                   draggable
-                  onDragStart={() => onDragStart(card.path)}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/markpad-path", card.path);
+                    e.dataTransfer.effectAllowed = "move";
+                    onDragStart(card.path);
+                  }}
                   onDragEnd={onDragEnd}
                 >
                   <div className="base-kanban__card-head">

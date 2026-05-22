@@ -8,7 +8,8 @@ import {
   getMetaYMap,
   metaMapToRecord,
   readTagsFromMeta,
-  setBodyYTextContent
+  setBodyYTextContent,
+  stripEmbeddedFrontmatterFromBody
 } from "@markpad/collab-note";
 
 const TAG_SPLIT = /[,;\s#]+/g;
@@ -39,7 +40,7 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
     if (!path) return;
     const entry = getFileEntry(ydoc, path);
     if (!entry) return;
-    const body = getBodyYText(entry).toString();
+    const body = stripEmbeddedFrontmatterFromBody(getBodyYText(entry).toString());
     const meta = metaMapToRecord(getMetaYMap(entry));
     setBodyText(body);
     setTagsInput(readTagsFromMeta(meta).join(", "));
@@ -69,7 +70,12 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
     const tags = parseTagsFromInput(tagsInput);
     const body = getBodyYText(entry);
     const meta = getMetaYMap(entry);
-    setBodyYTextContent(ydoc, body, bodyText, "markpad-kanban-modal");
+    setBodyYTextContent(
+      ydoc,
+      body,
+      stripEmbeddedFrontmatterFromBody(bodyText),
+      "markpad-kanban-modal"
+    );
     applyMetaPatchToYMap(
       ydoc,
       meta,

@@ -5,6 +5,7 @@ import {
   type ParsedNote
 } from "./noteDocument.js";
 import { patchMetaRecord } from "./meta.js";
+import { stripEmbeddedFrontmatterFromBody } from "./sanitizeBody.js";
 
 /** Y.Map `files` en mode dossier. */
 export const FILES_MAP_KEY = "files";
@@ -188,9 +189,22 @@ export function seedNoteRootFromMarkdown(
 
 export function readFileEntryAsParsed(fileEntry: Y.Map<unknown>): ParsedNote {
   return {
-    body: getBodyYText(fileEntry).toString(),
+    body: stripEmbeddedFrontmatterFromBody(getBodyYText(fileEntry).toString()),
     meta: metaMapToRecord(getMetaYMap(fileEntry))
   };
+}
+
+/** Retire du Y.Text corps les blocs `---` YAML accidentels (legacy / sync). Retourne true si corrigé. */
+export function healBodyYTextIfPolluted(
+  doc: Y.Doc,
+  body: Y.Text,
+  origin?: unknown
+): boolean {
+  const raw = body.toString();
+  const clean = stripEmbeddedFrontmatterFromBody(raw);
+  if (clean === raw) return false;
+  setBodyYTextContent(doc, body, clean, origin);
+  return true;
 }
 
 export function assembleFileEntry(fileEntry: Y.Map<unknown>): string {

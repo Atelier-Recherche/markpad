@@ -41,10 +41,12 @@ import {
   getNoteMetaYMap,
   getOrCreateFileEntry,
   hasNoteFileShape,
+  healBodyYTextIfPolluted,
   isNoteFileEntry,
   mergeMetaFromParsed,
   metaMapToRecord,
   migrateFilesMapLegacyToV2,
+  OBSIDIAN_ONLY_META_KEYS,
   parseNoteFromMarkdown,
   recordToMetaMap,
   seedFileEntryFromMarkdown,
@@ -296,6 +298,15 @@ export default class MarkpadPlugin extends Plugin {
   private vaultSyncTimers = new Map<string, ReturnType<typeof window.setTimeout>>();
   /** Évite une boucle vault.modify ↔ syncFolderFilesFromY. */
   private suppressVaultToY = false;
+
+  private applyBodyYToCmHealed(
+    cm: import("@codemirror/view").EditorView,
+    doc: Y.Doc,
+    body: Y.Text
+  ): boolean {
+    healBodyYTextIfPolluted(doc, body, "markpad-heal-before-cm");
+    return this.applyBodyYToCmHealed(cm, doc, body);
+  }
   private fileExplorerObserver: MutationObserver | null = null;
   private fileExplorerObservedEl: HTMLElement | null = null;
   /** Débounce : la liste virtualisée mutate en continu (~chaque frame) ; sans délai on saturerait le CPU. */
@@ -690,7 +701,11 @@ export default class MarkpadPlugin extends Plugin {
                 this.activeRuntime.cmView = currentCm;
               }
               remountCollabExtensionForYText(currentCm, this.activeRuntime.yText, this.activeRuntime.provider.awareness);
-              applyYTextToCm(currentCm, this.activeRuntime.yText);
+              this.applyBodyYToCmHealed(
+                currentCm,
+                this.activeRuntime.doc,
+                this.activeRuntime.yText
+              );
               mountCollabEditable(currentCm, !this.collabIsReadonly);
             }
           }
@@ -761,7 +776,11 @@ export default class MarkpadPlugin extends Plugin {
             this.activeRuntime.provider.awareness
           );
           // Sync initial explicite Y→CM (y-codemirror.next ne le fait pas automatiquement).
-          applyYTextToCm(currentCm, this.activeRuntime.yText);
+          this.applyBodyYToCmHealed(
+            currentCm,
+            this.activeRuntime.doc,
+            this.activeRuntime.yText
+          );
         }
       }
       if (!this.activeRuntime.provider.wsconnected) {
@@ -828,7 +847,11 @@ export default class MarkpadPlugin extends Plugin {
         this.activeRuntime.cmView = folderCm;
       }
       remountCollabExtensionForYText(folderCm, this.activeRuntime.yText, this.activeRuntime.provider.awareness);
-      const folderSynced = applyYTextToCm(folderCm, this.activeRuntime.yText);
+      const folderSynced = this.applyBodyYToCmHealed(
+        folderCm,
+        this.activeRuntime.doc,
+        this.activeRuntime.yText
+      );
       markpadCollabDebug("folder:file-open sync Y→CM initial", {
         folderSynced,
         yLen: this.activeRuntime.yText.toString().length,
@@ -882,7 +905,11 @@ export default class MarkpadPlugin extends Plugin {
     // futures mutations Y.Text sont propagées. Sans cette étape, CM garderait l'ancien
     // contenu du disque et le premier frappe de l'utilisateur écraserait les changements
     // distants (bridge CM→Y).
-    const synced = applyYTextToCm(currentCm, this.activeRuntime.yText);
+    const synced = this.applyBodyYToCmHealed(
+      currentCm,
+      this.activeRuntime.doc,
+      this.activeRuntime.yText
+    );
     markpadCollabDebug("file-open: sync Y→CM initial", {
       synced,
       yLen: this.activeRuntime.yText.toString().length,
@@ -1096,7 +1123,7 @@ export default class MarkpadPlugin extends Plugin {
           initialRemoteApplied = false;
           return;
         }
-        const synced = applyYTextToCm(targetCm, yText);
+        const synced = this.applyBodyYToCmHealed(targetCm, doc, yText);
         markpadCollabDebug("note: sync Y→CM après premier sync provider", {
           synced,
           yLen: yText.toString().length,
@@ -1191,7 +1218,7 @@ export default class MarkpadPlugin extends Plugin {
     // pour éviter d'appliquer un Y.Text vide local avant réception de l'état distant.
     if (options.seedFullFromEditor) {
       try {
-        applyYTextToCm(cm, yText);
+        this.applyBodyYToCmHealed(cm, doc, yText);
       } catch (error) {
         markpadCollabDebug("note: erreur applyYTextToCm (seed local)", error);
       }
@@ -2579,7 +2606,7 @@ export default class MarkpadPlugin extends Plugin {
       throw new Error("no_cm");
     }
     mountCollabExtensionWithYText(cm, yText, provider.awareness);
-    applyYTextToCm(cm, yText);
+    this.applyBodyYToCmHealed(cm, doc, yText);
     mountCollabEditable(cm, true);
     let debugUnload: (() => void) | undefined;
     if (this.settings.debugCollab) {
@@ -2648,6 +2675,11 @@ export default class MarkpadPlugin extends Plugin {
     const upgraded = migrateFilesMapLegacyToV2(doc, "markpad-folder-migrate-v2");
     if (upgraded > 0) {
       markpadCollabDebug("folder:migration Y.Text → body+meta", { upgraded });
+    }
+    for (const [, raw] of files.entries()) {
+      if (isNoteFileEntry(raw)) {
+        healBodyYTextIfPolluted(doc, getBodyYText(raw), "markpad-folder-heal-all");
+      }
     }
     void this.syncFolderFilesFromY(meta, folderRoot, doc);
     this.updatePresenceInStatusBar(provider);
@@ -2736,6 +2768,7 @@ export default class MarkpadPlugin extends Plugin {
           markpadCollabDebug("folder:sync nouvelle entrée meta depuis Y", path);
         }
 
+        healBodyYTextIfPolluted(doc, getBodyYText(value), "markpad-folder-sync-heal");
         const markdown = assembleFileEntry(value);
         const existing = this.app.vault.getAbstractFileByPath(path);
         if (!existing) {
@@ -2758,6 +2791,23 @@ export default class MarkpadPlugin extends Plugin {
             }
           } catch (e) {
             markpadCollabDebug("folder:sync modify vault échouée", path, e);
+          }
+        } else if (existing instanceof TFile && path === activePath) {
+          try {
+            const yMeta = metaMapToRecord(getMetaYMap(value));
+            await this.app.fileManager.processFrontMatter(existing, (fm) => {
+              for (const k of Object.keys(fm)) {
+                if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
+                if (!(k in yMeta)) delete fm[k];
+              }
+              for (const [k, v] of Object.entries(yMeta)) {
+                fm[k] = v;
+              }
+            });
+            changed = true;
+            markpadCollabDebug("folder:sync meta→FM (fichier actif)", path);
+          } catch (e) {
+            markpadCollabDebug("folder:sync meta FM actif échouée", path, e);
           }
         }
       }
@@ -2850,7 +2900,7 @@ export default class MarkpadPlugin extends Plugin {
     this.activeRuntime.yText = yText;
     this.activeRuntime.filePath = file.path;
     mountCollabExtensionWithYText(cm, yText, this.activeRuntime.provider.awareness);
-    applyYTextToCm(cm, yText);
+    this.applyBodyYToCmHealed(cm, this.activeRuntime.doc, yText);
     mountCollabEditable(cm, !this.collabIsReadonly);
     this.decorateSharedUi();
   }
