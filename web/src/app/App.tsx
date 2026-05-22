@@ -106,7 +106,9 @@ export const App = () => {
   const { t, i18n } = useTranslation();
   const { roomId = "" } = useParams();
   const { features: moduleFeatures } = useMarkpadPublicConfig();
-  const mountRef = useRef<HTMLDivElement | null>(null);
+  /** Hôte CM caché (Kanban / aperçu seul) — ne pas démonter pour garder le WebSocket. */
+  const hiddenCollabHostRef = useRef<HTMLDivElement | null>(null);
+  const editorCollabHostRef = useRef<HTMLDivElement | null>(null);
   const stableUserId = useMemo(() => getStableUserId(), []);
 
   const [status, setStatus] = useState<ConnectionStatus>("offline");
@@ -159,9 +161,9 @@ export const App = () => {
 
   const showEditor = viewMode === "edit" || viewMode === "split";
   const showPreview = viewMode === "preview" || viewMode === "split";
-  /** Ne change qu’entre aperçu seul (montage Yjs dérobé) et les modes avec éditeur visible. */
-  const editorMountSurface =
-    !showEditor && showPreview ? "preview-only" : "editor-surface";
+  const collabHostHidden = viewMode === "kanban" || (!showEditor && showPreview);
+  const pickCollabMountParent = (): HTMLDivElement | null =>
+    collabHostHidden ? hiddenCollabHostRef.current : editorCollabHostRef.current;
 
   const displayName =
     name.trim() ||
@@ -334,9 +336,10 @@ export const App = () => {
   }, [started]);
 
   useEffect(() => {
-    if (!started || !mountRef.current || !roomId) return;
+    const parent = pickCollabMountParent();
+    if (!started || !parent || !roomId) return;
     const rt = createCollabEditor({
-      parent: mountRef.current,
+      parent,
       wsBaseUrl,
       roomId,
       userId: stableUserId,
@@ -364,10 +367,17 @@ export const App = () => {
     wsBaseUrl,
     password,
     stableUserId,
-    editorMountSurface,
-    viewMode,
     moduleFeatures.markdownTables
   ]);
+
+  useEffect(() => {
+    if (!runtime) return;
+    const parent = pickCollabMountParent();
+    if (!parent) return;
+    runtime.reparent(parent);
+    const id = window.requestAnimationFrame(() => runtime.refreshLayout());
+    return () => window.cancelAnimationFrame(id);
+  }, [runtime, collabHostHidden, viewMode, showEditor, showPreview]);
 
   const prevFolderFileRef = useRef<string | null>(null);
   useEffect(() => {
@@ -996,21 +1006,19 @@ export const App = () => {
             <section
               className={`editor-shell ${showEditor && showPreview ? "editor-shell--fill" : ""}${!showEditor && showPreview ? " editor-shell--preview-only" : ""}${viewMode === "kanban" ? " editor-shell--kanban" : ""}`}
             >
+              <div
+                ref={hiddenCollabHostRef}
+                className="editor editor--yjs-mount-only"
+                aria-hidden={!collabHostHidden}
+              />
               {viewMode === "kanban" && effectiveBaseBoard && runtime ? (
-                <>
-                  <div
-                    ref={mountRef}
-                    className="editor editor--yjs-mount-only"
-                    aria-hidden
+                <div className="editor-shell__kanban-wrap">
+                  <BaseKanbanBoard
+                    ydoc={runtime.doc}
+                    folderPaths={folderPaths}
+                    parsed={effectiveBaseBoard}
                   />
-                  <div className="editor-shell__kanban-wrap">
-                    <BaseKanbanBoard
-                      ydoc={runtime.doc}
-                      folderPaths={folderPaths}
-                      parsed={effectiveBaseBoard}
-                    />
-                  </div>
-                </>
+                </div>
               ) : showEditor ? (
                 <Group orientation="horizontal" id="markpad-editor-layout">
                   <Panel
@@ -1019,7 +1027,7 @@ export const App = () => {
                     minSize={showPreview ? "22%" : "12%"}
                   >
                     <div
-                      ref={mountRef}
+                      ref={editorCollabHostRef}
                       className="editor"
                       style={{ height: "100%", minHeight: 0 }}
                     />
@@ -1039,17 +1047,10 @@ export const App = () => {
                 </Group>
               ) : null}
               {!showEditor && showPreview ? (
-                <>
-                  <div
-                    ref={mountRef}
-                    className="editor editor--yjs-mount-only"
-                    aria-hidden
-                  />
-                  <article
-                    className="preview markdown-body editor-shell-preview-article"
-                    dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
-                  />
-                </>
+                <article
+                  className="preview markdown-body editor-shell-preview-article"
+                  dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
+                />
               ) : null}
             </section>
           </Panel>

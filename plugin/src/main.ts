@@ -43,8 +43,10 @@ import {
   hasNoteFileShape,
   isNoteFileEntry,
   mergeMetaFromParsed,
+  metaMapToRecord,
   migrateFilesMapLegacyToV2,
   parseNoteFromMarkdown,
+  recordToMetaMap,
   seedFileEntryFromMarkdown,
   seedNoteRootFromMarkdown,
   upgradeLegacyFileEntry
@@ -934,8 +936,7 @@ export default class MarkpadPlugin extends Plugin {
       }
       const isActive = filePath === file.path;
       if (isActive && entry) {
-        const bodyY = getBodyYText(entry);
-        reconcileLocalBodyIntoY(doc, bodyY, parsed.body);
+        // Fichier ouvert : le corps vit dans CM/Y (collab), pas sur le disque (autosave Obsidian en retard).
         mergeMetaFromParsed(doc, getMetaYMap(entry), parsed.meta, "markpad-vault-meta");
         return;
       }
@@ -1921,13 +1922,32 @@ export default class MarkpadPlugin extends Plugin {
   private migrateYMapKeyAfterFileRename(oldPath: string, newPath: string, roomId: string): void {
     if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
     if (this.activeRuntime.roomId !== roomId) return;
-    const files = this.activeRuntime.doc.getMap("files");
-    const entry = files.get(oldPath);
-    if (!isNoteFileEntry(entry)) return;
-    this.activeRuntime.doc.transact(() => {
-      files.delete(oldPath);
-      files.set(newPath, entry);
-    }, "markpad-rename-file-key");
+    const doc = this.activeRuntime.doc;
+    const files = doc.getMap("files");
+    let entry = getFileEntry(doc, oldPath);
+    const legacy = files.get(oldPath);
+    if (!entry && legacy instanceof Y.Text) {
+      entry = upgradeLegacyFileEntry(doc, oldPath, legacy, "markpad-rename-file-key");
+    }
+    if (!entry) return;
+    const bodyStr = getBodyYText(entry).toString();
+    const metaRecord = metaMapToRecord(getMetaYMap(entry));
+    try {
+      doc.transact(() => {
+        files.delete(oldPath);
+        const existing = files.get(newPath);
+        if (existing instanceof Y.Text || getFileEntry(doc, newPath)) {
+          files.delete(newPath);
+        }
+        const newEntry = getOrCreateFileEntry(doc, newPath);
+        const body = getBodyYText(newEntry);
+        if (body.length > 0) body.delete(0, body.length);
+        if (bodyStr.length > 0) body.insert(0, bodyStr);
+        recordToMetaMap(doc, metaRecord, getMetaYMap(newEntry), "markpad-rename-file-key");
+      }, "markpad-rename-file-key");
+    } catch (e) {
+      markpadCollabDebug("migrateYMapKeyAfterFileRename échoué", { oldPath, newPath, e });
+    }
   }
 
   private migrateFolderKeysInYDoc(oldRoot: string, newRoot: string, roomId: string): void {
@@ -2662,6 +2682,12 @@ export default class MarkpadPlugin extends Plugin {
         }
       }
       await this.ensureFolderAnchorFile(meta.anchorPath, meta, meta.paths);
+      if (
+        this.activeRuntime?.mode === "folder" &&
+        this.activeRuntime.roomId === meta.roomId
+      ) {
+        void this.syncFolderFilesFromY(meta, root, this.activeRuntime.doc);
+      }
       this.decorateSharedUi();
       this.refreshSharesPanel();
       break;
@@ -2758,6 +2784,25 @@ export default class MarkpadPlugin extends Plugin {
         }
         if (activePath === path) {
           this.disconnect();
+        }
+      }
+
+      // Fichiers créés localement (vault) pas encore dans Y : pousser vers la room.
+      for (const path of meta.paths) {
+        if (!isFolderSharePath(path)) continue;
+        if (!isPathInFolder(path, folderRoot)) continue;
+        if (path.endsWith(`/${FOLDER_SHARE_FILENAME}`)) continue;
+        if (yPaths.has(path)) continue;
+        const tfile = this.app.vault.getAbstractFileByPath(path);
+        if (!(tfile instanceof TFile)) continue;
+        try {
+          const raw = await this.app.vault.read(tfile);
+          seedFileEntryFromMarkdown(doc, path, raw, "markpad-folder-vault-seed");
+          yPaths.add(path);
+          changed = true;
+          markpadCollabDebug("folder:sync entrée Y depuis nouveau fichier vault", path);
+        } catch (e) {
+          markpadCollabDebug("folder:sync seed vault→Y échoué", path, e);
         }
       }
     } finally {

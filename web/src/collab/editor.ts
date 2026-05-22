@@ -37,6 +37,8 @@ export interface CollabRuntime {
   formatHr: () => void;
   /** Recalcule la mise en page CodeMirror (p.ex. après changement de panneau). */
   refreshLayout: () => void;
+  /** Déplace le conteneur CM sans recréer le WebSocket (changement vue Kanban / aperçu). */
+  reparent: (parent: HTMLElement) => void;
   switchActiveFile: (activeFilePath: string | null, folderPaths?: string[]) => void;
   destroy: () => void;
 }
@@ -147,6 +149,7 @@ export const createCollabEditor = (input: {
 
   let view: EditorView | null = null;
   let root: HTMLDivElement | null = null;
+  let hostParent: HTMLElement = input.parent;
   let yText: Y.Text | null = null;
   let cursorInterval = 0;
   let onSel: (() => void) | null = null;
@@ -251,11 +254,20 @@ export const createCollabEditor = (input: {
   const buildEditor = (): void => {
     if (view) return;
     yText = resolveBodyYText(ydoc, folderPathsRef, activeFilePathRef);
-    input.parent.innerHTML = "";
+    hostParent.innerHTML = "";
     root = document.createElement("div");
     root.className = "markpad-cm-root";
-    input.parent.appendChild(root);
+    hostParent.appendChild(root);
     mountEditorView();
+  };
+
+  const reparent = (nextParent: HTMLElement): void => {
+    if (hostParent === nextParent && root?.parentElement === nextParent) return;
+    hostParent = nextParent;
+    if (!root) return;
+    nextParent.innerHTML = "";
+    nextParent.appendChild(root);
+    view?.requestMeasure();
   };
 
   const switchActiveFile = (
@@ -319,6 +331,7 @@ export const createCollabEditor = (input: {
         view.requestMeasure();
       }
     },
+    reparent,
     switchActiveFile,
     destroy: () => {
       window.clearInterval(cursorInterval);
@@ -330,7 +343,7 @@ export const createCollabEditor = (input: {
         view = null;
       }
       ydoc.destroy();
-      input.parent.innerHTML = "";
+      hostParent.innerHTML = "";
     }
   };
 };

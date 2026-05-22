@@ -1,4 +1,11 @@
-import { Compartment, EditorState, StateEffect, Transaction, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  StateEffect,
+  Transaction,
+  type Extension
+} from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 export { EditorView };
 import { setIcon } from "obsidian";
@@ -363,12 +370,16 @@ export const applyYTextToCm = (view: EditorView, yText: Y.Text): boolean => {
   const yContent = ySource.toString();
   const cmContent = view.state.doc.toString();
   if (yContent === cmContent) return false;
+  const sel = view.state.selection.main;
+  const preserveEnd =
+    sel.empty && sel.anchor === cmContent.length && yContent.startsWith(cmContent);
   // Informer le pont CM→Y de sauter ce dispatch (CM reçoit Y, pas l'inverse).
   const bridge = view.plugin(markpadCmYBridge);
   if (bridge) bridge.skipNextUpdate = true;
   view.dispatch({
     changes: { from: 0, to: cmContent.length, insert: yContent },
-    annotations: [Transaction.addToHistory.of(false)]
+    annotations: [Transaction.addToHistory.of(false)],
+    selection: preserveEnd ? EditorSelection.cursor(yContent.length) : undefined
   });
   return true;
 };
