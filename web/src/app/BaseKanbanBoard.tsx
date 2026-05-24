@@ -23,8 +23,6 @@ import {
   NO_VALUE_COLUMN,
   type ParsedBaseKanban
 } from "../base/parseBaseFile";
-import { KanbanNoteModal } from "./KanbanNoteModal";
-
 export type KanbanCardModel = {
   path: string;
   title: string;
@@ -56,15 +54,14 @@ type BaseKanbanBoardProps = {
   ydoc: Y.Doc;
   folderPaths: string[];
   parsed: ParsedBaseKanban;
+  onEditNote: (path: string) => void;
 };
 
-export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardProps) => {
+export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed, onEditNote }: BaseKanbanBoardProps) => {
   const { t } = useTranslation();
   const [allCards, setAllCards] = useState<KanbanCardModel[]>([]);
   const [dragPath, setDragPath] = useState<string | null>(null);
   const [filterTag, setFilterTag] = useState<string>(FILTER_ALL);
-  const [modalPath, setModalPath] = useState<string | null>(null);
-
   const pathsToScan = useMemo(() => {
     const fromY = listCollaborativeFilePaths(ydoc);
     return [...new Set([...folderPaths, ...fromY])].sort((a, b) => a.localeCompare(b));
@@ -210,10 +207,6 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
     setDragPath(null);
   };
 
-  const openEditor = (path: string): void => {
-    setModalPath(path);
-  };
-
   return (
     <div className="base-kanban">
       <p className="base-kanban__hint">{t("kanban.hint")}</p>
@@ -269,7 +262,7 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
                       className="base-kanban__card-edit"
                       title={t("kanban.editNote")}
                       aria-label={t("kanban.editNote")}
-                      onClick={() => openEditor(card.path)}
+                      onClick={() => onEditNote(card.path)}
                     >
                       <Pencil size={14} aria-hidden />
                     </button>
@@ -289,12 +282,6 @@ export const BaseKanbanBoard = ({ ydoc, folderPaths, parsed }: BaseKanbanBoardPr
           </section>
         ))}
       </div>
-      <KanbanNoteModal
-        open={modalPath != null}
-        path={modalPath}
-        ydoc={ydoc}
-        onClose={() => setModalPath(null)}
-      />
     </div>
   );
 };

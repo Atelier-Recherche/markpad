@@ -79,6 +79,8 @@
     "modalTags": "Etiquetas",
     "modalTagsPlaceholder": "p. ej. todo, urgente",
     "modalTagsHint": "Etiquetas separadas por comas; se guardan como lista YAML « tags » (se quita « tag » en singular).",
+    "modalTagsHintLive": "Sincronización en vivo con Obsidian — sin botón Guardar.",
+    "editNote": "Editar nota",
     "modalContent": "Contenido del archivo",
     "modalSave": "Guardar",
     "modalCancel": "Cancelar",

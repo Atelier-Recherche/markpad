@@ -49,6 +49,7 @@ import { FileTreePanel } from "./FileTreePanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { RoomChatPanel } from "./RoomChatPanel";
 import { BaseKanbanBoard } from "./BaseKanbanBoard";
+import { KanbanNoteModal } from "./KanbanNoteModal";
 import { parseBaseKanban } from "../base/parseBaseFile";
 import { useMarkpadPublicConfig } from "../hooks/useMarkpadPublicConfig";
 
@@ -156,6 +157,9 @@ export const App = () => {
   const [folderPaths, setFolderPaths] = useState<string[]>([]);
   const [folderRootPrefix, setFolderRootPrefix] = useState("");
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  /** Édition carte Kanban : même CodeMirror collab que la vue note. */
+  const [kanbanModalPath, setKanbanModalPath] = useState<string | null>(null);
+  const kanbanRestorePathRef = useRef<string | null>(null);
   /** Rafraîchit l’aperçu quand le meta Yjs change sans toucher au corps. */
   const [yPreviewRevision, setYPreviewRevision] = useState(0);
 
@@ -372,12 +376,13 @@ export const App = () => {
 
   useEffect(() => {
     if (!runtime) return;
+    if (kanbanModalPath) return;
     const parent = pickCollabMountParent();
     if (!parent) return;
     runtime.reparent(parent);
     const id = window.requestAnimationFrame(() => runtime.refreshLayout());
     return () => window.cancelAnimationFrame(id);
-  }, [runtime, collabHostHidden, viewMode, showEditor, showPreview]);
+  }, [runtime, collabHostHidden, viewMode, showEditor, showPreview, kanbanModalPath]);
 
   const prevFolderFileRef = useRef<string | null>(null);
   useEffect(() => {
@@ -387,10 +392,11 @@ export const App = () => {
   /** Changement de fichier dossier sans recréer le WebSocket (évite connect/disconnect en boucle). */
   useEffect(() => {
     if (!runtime || !folderMode) return;
-    if (prevFolderFileRef.current === activeFilePath) return;
-    prevFolderFileRef.current = activeFilePath;
-    runtime.switchActiveFile(activeFilePath, folderPaths);
-  }, [runtime, folderMode, activeFilePath, folderPaths]);
+    const target = kanbanModalPath ?? activeFilePath;
+    if (prevFolderFileRef.current === target) return;
+    prevFolderFileRef.current = target;
+    runtime.switchActiveFile(target, folderPaths);
+  }, [runtime, folderMode, activeFilePath, folderPaths, kanbanModalPath]);
 
   useEffect(() => {
     if (!runtime) return;
@@ -1017,6 +1023,11 @@ export const App = () => {
                     ydoc={runtime.doc}
                     folderPaths={folderPaths}
                     parsed={effectiveBaseBoard}
+                    onEditNote={(p) => {
+                      kanbanRestorePathRef.current = activeFilePath;
+                      setKanbanModalPath(p);
+                      setActiveFilePath(p);
+                    }}
                   />
                 </div>
               ) : showEditor ? (
@@ -1130,6 +1141,22 @@ export const App = () => {
             </>
           ) : null}
         </Group>
+      ) : null}
+      {kanbanModalPath && runtime ? (
+        <KanbanNoteModal
+          open
+          path={kanbanModalPath}
+          runtime={runtime}
+          folderPaths={folderPaths}
+          onClose={() => {
+            setKanbanModalPath(null);
+            const restore =
+              kanbanRestorePathRef.current ??
+              pickInitialFolderActivePath(folderPaths, moduleFeatures.kanban);
+            kanbanRestorePathRef.current = null;
+            setActiveFilePath(restore);
+          }}
+        />
       ) : null}
     </main>
   );

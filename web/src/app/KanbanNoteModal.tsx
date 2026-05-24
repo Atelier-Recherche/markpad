@@ -1,16 +1,14 @@
 import * as Y from "yjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   applyMetaPatchToYMap,
   getFileEntry,
-  getBodyYText,
   getMetaYMap,
   metaMapToRecord,
-  readTagsFromMeta,
-  setBodyYTextContent,
-  stripEmbeddedFrontmatterFromBody
+  readTagsFromMeta
 } from "@markpad/collab-note";
+import type { CollabRuntime } from "../collab/editor";
 
 const TAG_SPLIT = /[,;\s#]+/g;
 
@@ -27,29 +25,61 @@ function parseTagsFromInput(s: string): string[] {
 export type KanbanNoteModalProps = {
   open: boolean;
   path: string | null;
-  ydoc: Y.Doc;
+  runtime: CollabRuntime;
+  folderPaths: string[];
   onClose: () => void;
 };
 
-export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalProps) => {
+export const KanbanNoteModal = ({
+  open,
+  path,
+  runtime,
+  folderPaths,
+  onClose
+}: KanbanNoteModalProps) => {
   const { t } = useTranslation();
-  const [bodyText, setBodyText] = useState("");
+  const editorHostRef = useRef<HTMLDivElement>(null);
   const [tagsInput, setTagsInput] = useState("");
+  const tagsDebounceRef = useRef<number | null>(null);
 
-  const refreshFromY = useCallback(() => {
-    if (!path) return;
-    const entry = getFileEntry(ydoc, path);
-    if (!entry) return;
-    const body = stripEmbeddedFrontmatterFromBody(getBodyYText(entry).toString());
-    const meta = metaMapToRecord(getMetaYMap(entry));
-    setBodyText(body);
-    setTagsInput(readTagsFromMeta(meta).join(", "));
-  }, [path, ydoc]);
+  const pushTagsToY = useCallback(
+    (raw: string) => {
+      if (!path) return;
+      const entry = getFileEntry(runtime.doc, path);
+      if (!entry) return;
+      const tags = parseTagsFromInput(raw);
+      applyMetaPatchToYMap(
+        runtime.doc,
+        getMetaYMap(entry),
+        { tags: tags.length ? tags : undefined, tag: undefined },
+        "markpad-kanban-tags"
+      );
+    },
+    [path, runtime.doc]
+  );
 
   useEffect(() => {
     if (!open || !path) return;
-    refreshFromY();
-  }, [open, path, refreshFromY]);
+    const entry = getFileEntry(runtime.doc, path);
+    if (!entry) return;
+    const metaMap = getMetaYMap(entry);
+    const syncTags = (): void => {
+      setTagsInput(readTagsFromMeta(metaMapToRecord(metaMap)).join(", "));
+    };
+    syncTags();
+    metaMap.observe(syncTags);
+    return () => metaMap.unobserve(syncTags);
+  }, [open, path, runtime.doc]);
+
+  useEffect(() => {
+    if (!open || !path) return;
+    const host = editorHostRef.current;
+    if (!host) return;
+    runtime.switchActiveFile(path, folderPaths);
+    runtime.reparent(host);
+    const raf = window.requestAnimationFrame(() => runtime.refreshLayout());
+    return () => window.cancelAnimationFrame(raf);
+  }, [open, path, runtime, folderPaths]);
 
   useEffect(() => {
     if (!open) return;
@@ -63,30 +93,14 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const save = (): void => {
-    if (!path) return;
-    const entry = getFileEntry(ydoc, path);
-    if (!entry) return;
-    const tags = parseTagsFromInput(tagsInput);
-    const body = getBodyYText(entry);
-    const meta = getMetaYMap(entry);
-    setBodyYTextContent(
-      ydoc,
-      body,
-      stripEmbeddedFrontmatterFromBody(bodyText),
-      "markpad-kanban-modal"
-    );
-    applyMetaPatchToYMap(
-      ydoc,
-      meta,
-      {
-        tags: tags.length ? tags : undefined,
-        tag: undefined
-      },
-      "markpad-kanban-modal"
-    );
-    onClose();
-  };
+  useEffect(
+    () => () => {
+      if (tagsDebounceRef.current != null) {
+        window.clearTimeout(tagsDebounceRef.current);
+      }
+    },
+    []
+  );
 
   if (!open || !path) return null;
 
@@ -100,7 +114,7 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       <div
-        className="kanban-modal"
+        className="kanban-modal kanban-modal--editor"
         role="dialog"
         aria-modal="true"
         aria-labelledby="kanban-modal-title"
@@ -110,11 +124,16 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
           <h2 id="kanban-modal-title" className="kanban-modal__title">
             {fileName}
           </h2>
-          <button type="button" className="kanban-modal__close" onClick={onClose} aria-label={t("kanban.modalClose")}>
+          <button
+            type="button"
+            className="kanban-modal__close"
+            onClick={onClose}
+            aria-label={t("kanban.modalClose")}
+          >
             ×
           </button>
         </header>
-        <div className="kanban-modal__body">
+        <div className="kanban-modal__tags-row">
           <label className="kanban-modal__label" htmlFor="kanban-modal-tags">
             {t("kanban.modalTags")}
           </label>
@@ -123,31 +142,25 @@ export const KanbanNoteModal = ({ open, path, ydoc, onClose }: KanbanNoteModalPr
             type="text"
             className="kanban-modal__input"
             value={tagsInput}
-            onChange={(e) => setTagsInput(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setTagsInput(v);
+              if (tagsDebounceRef.current != null) {
+                window.clearTimeout(tagsDebounceRef.current);
+              }
+              tagsDebounceRef.current = window.setTimeout(() => {
+                tagsDebounceRef.current = null;
+                pushTagsToY(v);
+              }, 350);
+            }}
             placeholder={t("kanban.modalTagsPlaceholder")}
             autoComplete="off"
           />
-          <p className="kanban-modal__hint">{t("kanban.modalTagsHint")}</p>
-          <label className="kanban-modal__label" htmlFor="kanban-modal-body">
-            {t("kanban.modalContent")}
-          </label>
-          <textarea
-            id="kanban-modal-body"
-            className="kanban-modal__textarea"
-            spellCheck={false}
-            value={bodyText}
-            onChange={(e) => setBodyText(e.target.value)}
-            rows={18}
-          />
+          <p className="kanban-modal__hint">{t("kanban.modalTagsHintLive")}</p>
         </div>
-        <footer className="kanban-modal__footer">
-          <button type="button" className="me-btn-secondary" onClick={onClose}>
-            {t("kanban.modalCancel")}
-          </button>
-          <button type="button" className="me-btn-primary" onClick={save}>
-            {t("kanban.modalSave")}
-          </button>
-        </footer>
+        <div className="kanban-modal__editor-host">
+          <div ref={editorHostRef} className="editor kanban-modal__cm" />
+        </div>
       </div>
     </div>
   );

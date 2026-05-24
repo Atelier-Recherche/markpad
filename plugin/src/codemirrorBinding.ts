@@ -114,7 +114,21 @@ class MarkpadCmYBridge {
       cmHead: cm.slice(0, 80).replace(/\n/g, "\\n")
     });
     applyMinimalYTextEdit(ytext.doc, ytext, y, cm, conf);
-    markpadCollabDebug("pont CM→Y: après apply", { yLen: ytext.toString().length });
+    let yAfter = ytext.toString();
+    if (yAfter !== cm) {
+      // Origin YSyncConfig parfois ignoré : repli explicite pour ne pas laisser Y vide.
+      applyMinimalYTextEdit(ytext.doc, ytext, yAfter, cm, "markpad-cm-bridge");
+      yAfter = ytext.toString();
+      if (yAfter !== cm) {
+        markpadCollabDebug("pont CM→Y: échec alignement", {
+          cmLen: cm.length,
+          yLen: yAfter.length,
+          facetDoc: ytext.doc?.guid,
+          ytextId: ytext.toString().slice(0, 20)
+        });
+      }
+    }
+    markpadCollabDebug("pont CM→Y: après apply", { yLen: yAfter.length });
   }
 }
 

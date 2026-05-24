@@ -72,13 +72,15 @@
     "disconnected": "Chat déconnecté"
   },
   "kanban": {
-    "hint": "Glissez une carte vers une colonne pour la déplacer. Double-clic ou crayon : édition dans une fenêtre (contenu Markdown et tags). Filtrez les cartes par étiquette avec les onglets ci-dessous.",
+    "hint": "Glissez une carte vers une colonne pour la déplacer. Clic sur le crayon : édition collaborative (même éditeur que les notes). Filtrez par étiquette avec les onglets ci-dessous.",
     "filterAll": "Toutes",
     "filterAria": "Filtrer les cartes par étiquette",
     "editCard": "Modifier la note",
     "modalTags": "Étiquettes (tags)",
     "modalTagsPlaceholder": "ex. todo, urgent",
     "modalTagsHint": "Séparez les étiquettes par des virgules ; elles sont écrites dans le frontmatter YAML (liste « tags », le champ « tag » seul est retiré).",
+    "modalTagsHintLive": "Synchronisation en direct avec Obsidian — pas de bouton Enregistrer.",
+    "editNote": "Éditer la note",
     "modalContent": "Contenu du fichier",
     "modalSave": "Enregistrer",
     "modalCancel": "Annuler",

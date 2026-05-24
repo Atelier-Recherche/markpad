@@ -79,6 +79,8 @@
     "modalTags": "Tags",
     "modalTagsPlaceholder": "z. B. todo, dringend",
     "modalTagsHint": "Kommagetrennte Tags; als YAML-Liste « tags » (einzelnes « tag » wird entfernt).",
+    "modalTagsHintLive": "Live-Sync mit Obsidian — kein Speichern-Button.",
+    "editNote": "Notiz bearbeiten",
     "modalContent": "Dateiinhalt",
     "modalSave": "Speichern",
     "modalCancel": "Abbrechen",

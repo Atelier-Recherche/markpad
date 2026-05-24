@@ -72,13 +72,15 @@
     "disconnected": "Chat disconnected"
   },
   "kanban": {
-    "hint": "Drag a card onto a column to move it. Double-click or pencil: edit in a pop-up (Markdown and tags). Use the tabs above to filter cards by tag.",
+    "hint": "Drag a card onto a column to move it. Click the pencil: collaborative editing (same editor as notes). Filter by tag with the tabs above.",
     "filterAll": "All",
     "filterAria": "Filter cards by tag",
     "editCard": "Edit note",
     "modalTags": "Tags",
     "modalTagsPlaceholder": "e.g. todo, urgent",
     "modalTagsHint": "Comma-separated tags; stored as YAML list « tags » (singular « tag » is removed to avoid duplicates).",
+    "modalTagsHintLive": "Live sync with Obsidian — no Save button.",
+    "editNote": "Edit note",
     "modalContent": "File content",
     "modalSave": "Save",
     "modalCancel": "Cancel",
