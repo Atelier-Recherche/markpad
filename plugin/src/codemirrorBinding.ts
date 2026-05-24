@@ -370,6 +370,13 @@ export const applyYTextToCm = (view: EditorView, yText: Y.Text): boolean => {
   const yContent = ySource.toString();
   const cmContent = view.state.doc.toString();
   if (yContent === cmContent) return false;
+  // Y vide + CM non vide : ne pas pousser Y→CM (crash YSync deleteText + effacement du brouillon).
+  if (yContent.length === 0 && cmContent.length > 0) {
+    markpadCollabDebug("applyYTextToCm: ignoré (Y vide, CM non vide)", {
+      cmLen: cmContent.length
+    });
+    return false;
+  }
   const sel = view.state.selection.main;
   const preserveEnd =
     sel.empty && sel.anchor === cmContent.length && yContent.startsWith(cmContent);

@@ -310,6 +310,8 @@ export default class MarkpadPlugin extends Plugin {
   /** Évite la réentrance Y.Map observe / sync dossier (stack overflow). */
   private folderSyncInProgress = false;
   private folderSyncQueued = false;
+  /** Bloque tryAutoConnect pendant startSharing / attach explicite (évite un 2e attach seed=false). */
+  private collabAttachInProgress = false;
 
   private applyBodyYToCmHealed(
     cm: import("@codemirror/view").EditorView,
@@ -716,6 +718,7 @@ export default class MarkpadPlugin extends Plugin {
 
   private async tryAutoConnectActiveFile(): Promise<void> {
     if (!this.settings.autoReconnect) return;
+    if (this.collabAttachInProgress) return;
     const active = this.getActiveMarkdownFileAndView();
     if (!active) {
       // Si on sort de Markdown / de la vue active, on coupe la session collab existante.
@@ -1161,12 +1164,27 @@ export default class MarkpadPlugin extends Plugin {
           initialRemoteApplied = false;
           return;
         }
-        const synced = this.applyBodyYToCmHealed(targetCm, doc, yText);
-        markpadCollabDebug("note: sync Y→CM après premier sync provider", {
-          synced,
-          yLen: yText.toString().length,
-          cmLen: targetCm.state.doc.toString().length
-        });
+        const yLen = yText.toString().length;
+        const cmLen = targetCm.state.doc.toString().length;
+        if (yLen === 0 && cmLen > 0) {
+          const full = view.editor.getValue();
+          if (full.length > 0) {
+            seedNoteRootFromMarkdown(doc, full, "markpad-fill-y-after-sync");
+            markpadCollabDebug("note: Y vide après sync → contenu local injecté dans Y", {
+              yLenAfter: yText.toString().length,
+              cmLen
+            });
+          } else {
+            markpadCollabDebug("note: Y et CM vides après sync, pas d'apply Y→CM");
+          }
+        } else {
+          const synced = this.applyBodyYToCmHealed(targetCm, doc, yText);
+          markpadCollabDebug("note: sync Y→CM après premier sync provider", {
+            synced,
+            yLen: yText.toString().length,
+            cmLen: targetCm.state.doc.toString().length
+          });
+        }
       } catch (error) {
         // Ne jamais laisser une exception Yjs interrompre le re-attach.
         markpadCollabDebug("note: erreur applyYTextToCm (post-sync)", error);
@@ -1335,6 +1353,11 @@ export default class MarkpadPlugin extends Plugin {
     }
 
     this.disconnect();
+    if (this.autoConnectTimer != null) {
+      window.clearTimeout(this.autoConnectTimer);
+      this.autoConnectTimer = null;
+    }
+    this.collabAttachInProgress = true;
 
     try {
       const created = await createShareSession({
@@ -1371,6 +1394,8 @@ export default class MarkpadPlugin extends Plugin {
     } catch (error) {
       this.updateStatusBar("error");
       new Notice(this.humanizeShareError(error));
+    } finally {
+      this.collabAttachInProgress = false;
     }
   }
 
@@ -2408,6 +2433,11 @@ export default class MarkpadPlugin extends Plugin {
       return;
     }
     this.disconnect();
+    if (this.autoConnectTimer != null) {
+      window.clearTimeout(this.autoConnectTimer);
+      this.autoConnectTimer = null;
+    }
+    this.collabAttachInProgress = true;
     const anchorPath = normalizePath(`${folder.path}/${FOLDER_SHARE_FILENAME}`);
     markpadCollabDebug("folder:startSharing", {
       folderPath: folder.path,
@@ -2456,6 +2486,8 @@ export default class MarkpadPlugin extends Plugin {
     } catch (error) {
       this.updateStatusBar("error");
       new Notice(`Markpad erreur: ${(error as Error).message}`);
+    } finally {
+      this.collabAttachInProgress = false;
     }
   }
 
