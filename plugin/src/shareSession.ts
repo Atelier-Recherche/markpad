@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { MarkpadSettings } from "./settings";
+import { normalizeAuthToken, resolveAccountUserId } from "./jwt";
 
 const parseSessionErrorBody = (response: { json: unknown }): string | undefined => {
   try {
@@ -21,23 +22,32 @@ export interface ValidatedSession {
   filePaths: string[];
 }
 
+const requireAccountUserId = (settings: MarkpadSettings): string => {
+  const userId = resolveAccountUserId(settings.authToken);
+  if (!userId) {
+    throw new Error("auth_token_invalid_or_missing");
+  }
+  return userId;
+};
+
 export const createShareSession = async (payload: {
   serverUrl: string;
   settings: MarkpadSettings;
   noteId: string;
   roomPassword?: string;
 }): Promise<ShareSessionResult> => {
+  const userId = requireAccountUserId(payload.settings);
   const endpoint = `${payload.serverUrl}/sessions`;
   const response = await requestUrl({
     url: endpoint,
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${payload.settings.authToken}`
+      authorization: `Bearer ${normalizeAuthToken(payload.settings.authToken)}`
     },
     body: JSON.stringify({
       noteId: payload.noteId,
-      userId: payload.settings.userId,
+      userId,
       roomPassword: payload.roomPassword
     })
   });
@@ -67,17 +77,18 @@ export const createFolderShareSession = async (payload: {
   filePaths: string[];
   roomPassword?: string;
 }): Promise<ShareSessionResult> => {
+  const userId = requireAccountUserId(payload.settings);
   const endpoint = `${payload.serverUrl}/sessions`;
   const response = await requestUrl({
     url: endpoint,
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${payload.settings.authToken}`
+      authorization: `Bearer ${normalizeAuthToken(payload.settings.authToken)}`
     },
     body: JSON.stringify({
       noteId: payload.noteId,
-      userId: payload.settings.userId,
+      userId,
       roomPassword: payload.roomPassword,
       kind: "folder",
       folderPath: payload.folderPath,
@@ -106,17 +117,16 @@ export const endShareSession = async (payload: {
   settings: MarkpadSettings;
   roomId: string;
 }): Promise<void> => {
+  const userId = requireAccountUserId(payload.settings);
   const endpoint = `${payload.serverUrl}/sessions/${payload.roomId}`;
   const response = await requestUrl({
     url: endpoint,
     method: "DELETE",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${payload.settings.authToken}`
+      authorization: `Bearer ${normalizeAuthToken(payload.settings.authToken)}`
     },
-    body: JSON.stringify({
-      userId: payload.settings.userId
-    })
+    body: JSON.stringify({ userId })
   });
 
   if (response.status < 200 || response.status > 299) {

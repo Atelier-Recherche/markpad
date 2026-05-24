@@ -175,7 +175,7 @@ vers :
 Ensuite, dans Obsidian :
 
 1. Active le plugin communautaire `Markpad`.
-2. Configure `Server URL`, puis collez le **jeton de connexion** copié depuis **Mon compte** (l’identifiant utilisateur se remplit automatiquement).
+2. Configure `Server URL`, puis collez le **jeton de connexion** copié depuis **Mon compte**.
 3. Ouvre une note et lance `Start Sharing`.
 
 ## Dev local manuel (sans script)

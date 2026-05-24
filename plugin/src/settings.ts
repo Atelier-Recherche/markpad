@@ -1,6 +1,6 @@
 import { App, Modal, PluginSettingTab, Setting } from "obsidian";
 import type MarkpadPlugin from "./main";
-import { syncUserIdFromAuthToken } from "./jwt";
+import { normalizeAuthToken } from "./jwt";
 
 import { t, type LocaleId } from "./locale";
 
@@ -8,7 +8,6 @@ export interface MarkpadSettings {
   serverUrl: string;
   /** JWT obtenu sur la page Mon compte après connexion par e-mail. */
   authToken: string;
-  userId: string;
   displayName: string;
   color: string;
   /** Interface plugin (réglages, commandes). */
@@ -23,7 +22,6 @@ export interface MarkpadSettings {
 export const DEFAULT_SETTINGS: MarkpadSettings = {
   serverUrl: "http://localhost:1234",
   authToken: "",
-  userId: "",
   displayName: "Obsidian User",
   color: "#7c3aed",
   locale: "fr",
@@ -74,18 +72,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
       .setDesc(t(L, "authTokenDesc"))
       .addText((text) =>
         text.setValue(this.plugin.settings.authToken).onChange(async (value) => {
-          this.plugin.settings.authToken = value.trim();
-          syncUserIdFromAuthToken(this.plugin.settings);
-          await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName(t(L, "userId"))
-      .setDesc(t(L, "userIdDesc"))
-      .addText((text) =>
-        text.setValue(this.plugin.settings.userId).onChange(async (value) => {
-          this.plugin.settings.userId = value.trim();
+          this.plugin.settings.authToken = normalizeAuthToken(value);
           await this.plugin.saveSettings();
         })
       );
@@ -128,7 +115,7 @@ export class MarkpadSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(t(L, "autoReconnect"))
       .setDesc(
-        "Si une note contient markpadShare dans le frontmatter, reconnecter le WebSocket à l’ouverture (user ID requis ; mot de passe = défaut ci-dessus)."
+        "Si une note contient markpadShare dans le frontmatter, reconnecter le WebSocket à l’ouverture (mot de passe = défaut ci-dessus)."
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoReconnect).onChange(async (value) => {

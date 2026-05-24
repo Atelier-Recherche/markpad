@@ -6,8 +6,6 @@ const STRINGS: Record<
     | "serverUrl"
     | "authToken"
     | "authTokenDesc"
-    | "userId"
-    | "userIdDesc"
     | "displayName"
     | "cursorColor"
     | "defaultRoomPassword"
@@ -30,10 +28,7 @@ const STRINGS: Record<
     serverUrl: "URL du serveur",
     authToken: "Jeton de connexion",
     authTokenDesc:
-      "Copiez-le depuis la page Mon compte du serveur Markpad, après connexion par e-mail (bouton « Copier le jeton »). Il permet de créer et supprimer vos partages depuis Obsidian.",
-    userId: "Identifiant utilisateur",
-    userIdDesc:
-      "Rempli automatiquement quand vous collez le jeton. Doit correspondre à votre compte Markpad (affiché sur Mon compte).",
+      "Copiez-le depuis la page Mon compte du serveur Markpad, après connexion par e-mail (bouton « Copier le jeton »). Il identifie votre compte pour créer et supprimer vos partages.",
     displayName: "Nom affiché",
     cursorColor: "Couleur du curseur",
     defaultRoomPassword: "Mot de passe room par défaut",
@@ -54,10 +49,7 @@ const STRINGS: Record<
     serverUrl: "Server URL",
     authToken: "Sign-in token",
     authTokenDesc:
-      "Copy it from the Markpad server's My account page after email sign-in (Copy token button). Required to create and delete your shares from Obsidian.",
-    userId: "User ID",
-    userIdDesc:
-      "Filled automatically when you paste the token. Must match your Markpad account (shown on My account).",
+      "Copy it from the Markpad server's My account page after email sign-in (Copy token button). It identifies your account to create and delete your shares.",
     displayName: "Display name",
     cursorColor: "Cursor color",
     defaultRoomPassword: "Default room password",
@@ -78,10 +70,7 @@ const STRINGS: Record<
     serverUrl: "URL del servidor",
     authToken: "Token de conexión",
     authTokenDesc:
-      "Cópialo desde Mi cuenta en el servidor Markpad, tras iniciar sesión por correo (botón «Copiar token»). Necesario para crear y eliminar tus compartidos desde Obsidian.",
-    userId: "ID de usuario",
-    userIdDesc:
-      "Se rellena al pegar el token. Debe coincidir con tu cuenta Markpad (visible en Mi cuenta).",
+      "Cópialo desde Mi cuenta en el servidor Markpad, tras iniciar sesión por correo (botón «Copiar token»). Identifica tu cuenta para crear y eliminar tus compartidos.",
     displayName: "Nombre mostrado",
     cursorColor: "Color del cursor",
     defaultRoomPassword: "Contraseña de sala por defecto",
@@ -102,10 +91,7 @@ const STRINGS: Record<
     serverUrl: "Server-URL",
     authToken: "Anmeldetoken",
     authTokenDesc:
-      "Aus „Mein Konto“ auf dem Markpad-Server nach E-Mail-Anmeldung kopieren (Schaltfläche „Token kopieren“). Erforderlich, um Freigaben aus Obsidian zu erstellen und zu löschen.",
-    userId: "Benutzer-ID",
-    userIdDesc:
-      "Wird beim Einfügen des Tokens automatisch ausgefüllt. Muss zu Ihrem Markpad-Konto passen (auf „Mein Konto“ angezeigt).",
+      "Aus „Mein Konto“ auf dem Markpad-Server nach E-Mail-Anmeldung kopieren (Schaltfläche „Token kopieren“). Identifiziert Ihr Konto zum Erstellen und Löschen von Freigaben.",
     displayName: "Anzeigename",
     cursorColor: "Cursorfarbe",
     defaultRoomPassword: "Standard-Raumpasswort",

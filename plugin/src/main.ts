@@ -32,7 +32,11 @@ import {
   setMarkpadCollabDebug
 } from "./markpadDebug";
 import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbound";
-import { jwtPayloadSub, syncUserIdFromAuthToken } from "./jwt";
+import {
+  diagnoseAuthToken,
+  normalizeAuthToken,
+  resolveAwarenessUserId
+} from "./jwt";
 import {
   assembleFileEntry,
   getBodyYText,
@@ -276,6 +280,8 @@ class JoinShareModal extends Modal {
 
 export default class MarkpadPlugin extends Plugin {
   public settings: MarkpadSettings = DEFAULT_SETTINGS;
+  /** Ancien réglage « User ID » (migration) — utilisé pour la collab si pas encore de jeton. */
+  private legacyUserId = "";
   private activeRuntime: ActiveRuntime | null = null;
   private statusBarEl: HTMLElement | null = null;
   private decoratedEls = new Set<HTMLElement>();
@@ -632,16 +638,40 @@ export default class MarkpadPlugin extends Plugin {
 
   private async loadSettings(): Promise<void> {
     const loaded = (await this.loadData()) as
-      | (Partial<MarkpadSettings> & { apiKey?: string })
+      | (Partial<MarkpadSettings> & { apiKey?: string; userId?: string })
       | null;
     const merged: MarkpadSettings = { ...DEFAULT_SETTINGS, ...(loaded ?? {}) };
     if (!merged.authToken && loaded?.apiKey) {
       merged.authToken = String(loaded.apiKey).trim();
     }
-    if (merged.authToken) {
-      syncUserIdFromAuthToken(merged);
-    }
+    merged.authToken = normalizeAuthToken(merged.authToken);
+    this.legacyUserId = String(loaded?.userId ?? "").trim();
     this.settings = merged;
+  }
+
+  private awarenessUserId(): string {
+    return resolveAwarenessUserId(
+      this.settings.authToken,
+      this.settings.displayName,
+      this.legacyUserId
+    );
+  }
+
+  private noticeAuthTokenIssue(): void {
+    const issue = diagnoseAuthToken(this.settings.authToken);
+    if (issue === "legacy_api_key") {
+      new Notice(
+        "Markpad : l’ancienne clé API (ex. dev-key) ne fonctionne plus. Connectez-vous sur Mon compte (web) et copiez le jeton JWT."
+      );
+      return;
+    }
+    if (issue === "invalid_jwt") {
+      new Notice(
+        "Markpad : jeton illisible ou incomplet. Sur Mon compte, cliquez « Copier le jeton » et recollez-le entièrement dans Obsidian."
+      );
+      return;
+    }
+    new Notice("Configurez le jeton de connexion (Mon compte) avant de partager.");
   }
 
   private getActiveMarkdownFileAndView():
@@ -685,7 +715,7 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async tryAutoConnectActiveFile(): Promise<void> {
-    if (!this.settings.autoReconnect || !this.settings.userId) return;
+    if (!this.settings.autoReconnect) return;
     const active = this.getActiveMarkdownFileAndView();
     if (!active) {
       // Si on sort de Markdown / de la vue active, on coupe la session collab existante.
@@ -1088,7 +1118,7 @@ export default class MarkpadPlugin extends Plugin {
     const yText = getNoteBodyYText(doc);
     const provider = new WebsocketProvider(`${wsBase}/ws`, roomId, doc, {
       params: {
-        userId: this.settings.userId,
+        userId: this.awarenessUserId(),
         name: this.settings.displayName,
         color: this.settings.color,
         password: options.roomPassword ?? ""
@@ -1293,8 +1323,8 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async startSharing(): Promise<void> {
-    if (!this.settings.authToken?.trim() || !this.settings.userId) {
-      new Notice("Configurez le jeton de connexion (Mon compte) avant de partager.");
+    if (diagnoseAuthToken(this.settings.authToken)) {
+      this.noticeAuthTokenIssue();
       return;
     }
 
@@ -1345,11 +1375,6 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async joinSharedNote(): Promise<void> {
-    if (!this.settings.userId) {
-      new Notice("Configure user ID avant de rejoindre un partage.");
-      return;
-    }
-
     let initialShareInput = "";
     try {
       initialShareInput = await navigator.clipboard.readText();
@@ -1449,7 +1474,10 @@ export default class MarkpadPlugin extends Plugin {
       return "Markpad: authentification refusée (401). Vérifie le jeton de connexion dans les réglages Obsidian (Mon compte).";
     }
     if (status === "403") {
-      return "Markpad: refusé (403). Vérifie que User ID correspond bien au compte du JWT.";
+      return "Markpad: refusé (403). Vérifie que le jeton de connexion correspond à votre compte.";
+    }
+    if (msg.includes("auth_token_invalid_or_missing")) {
+      return "Markpad: jeton invalide ou manquant. Copiez-le depuis Mon compte (après connexion par e-mail).";
     }
     if (status === "429" || msg.includes("share_limit_reached")) {
       return "Markpad: nombre maximum de partages atteint pour ce compte (limite serveur).";
@@ -2363,8 +2391,8 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async startSharingFolder(folder: TFolder): Promise<void> {
-    if (!this.settings.authToken?.trim() || !this.settings.userId) {
-      new Notice("Configurez le jeton de connexion (Mon compte) avant de partager.");
+    if (diagnoseAuthToken(this.settings.authToken)) {
+      this.noticeAuthTokenIssue();
       return;
     }
     const paths = this.collectFolderShareSyncPathsInFolder(folder);
@@ -2546,7 +2574,7 @@ export default class MarkpadPlugin extends Plugin {
     }
     const provider = new WebsocketProvider(`${wsBase}/ws`, meta.roomId, doc, {
       params: {
-        userId: this.settings.userId,
+        userId: this.awarenessUserId(),
         name: this.settings.displayName,
         color: this.settings.color,
         password: this.settings.defaultRoomPassword ?? ""
