@@ -101,7 +101,7 @@
     "collabTitle": "Colaboración",
     "collabBody": "Abre una sala compartida para editar en vivo en el navegador o unirte desde Obsidian.",
     "demoCta": "Abrir sala demo",
-    "pluginHint": "En Obsidian: URL del servidor y tu User ID. Para crear compartidos, usa la clave del servidor (ALLOWED_API_KEYS) o el JWT de Mi cuenta tras iniciar sesión — no hace falta ambos."
+    "pluginHint": "En Obsidian: URL del servidor y el token copiado desde Mi cuenta tras iniciar sesión. El ID de usuario se rellena automáticamente."
   },
   "guest": "Invitado",
   "me": {
@@ -138,9 +138,9 @@
     "adminHint": "Tu cuenta tiene permisos de administrador.",
     "logout": "Olvidar el token en este dispositivo",
     "copied": "Copiado",
-    "jwtPluginTitle": "Token para el plugin (en lugar de la clave del servidor)",
-    "jwtPluginHint": "Este token prueba que has iniciado sesión: pégalo en el campo «Clave API o JWT» del plugin. Sustituye a ALLOWED_API_KEYS para crear compartidos. Mantén el mismo User ID que arriba.",
-    "copyJwt": "Copiar JWT"
+    "jwtPluginTitle": "Token para el plugin Obsidian",
+    "jwtPluginHint": "Pégalo en los ajustes de Markpad en Obsidian (campo «Token de conexión»). Permite crear y eliminar tus compartidos. El ID de usuario se rellena solo.",
+    "copyJwt": "Copiar token"
   },
   "auth": {
     "verify": {

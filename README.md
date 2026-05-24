@@ -37,7 +37,6 @@ Variables principales (voir [`.env.example`](.env.example)) :
 - `SERVER_PORT`, `SERVER_HOST`
 - `WEB_PORT`
 - `PUBLIC_SERVER_URL`, `PUBLIC_WEB_URL`
-- `ALLOWED_API_KEYS`
 - `REDIS_URL`
 - `SESSION_MAX_IDLE_MS` — durée sans activité avant suppression de la room (défaut ~1 an)
 - `SESSION_CLEANUP_INTERVAL_MS` — fréquence du nettoyage des rooms expirées
@@ -176,7 +175,7 @@ vers :
 Ensuite, dans Obsidian :
 
 1. Active le plugin communautaire `Markpad`.
-2. Configure `Server URL`, `API Key`, `User ID`.
+2. Configure `Server URL`, puis collez le **jeton de connexion** copié depuis **Mon compte** (l’identifiant utilisateur se remplit automatiquement).
 3. Ouvre une note et lance `Start Sharing`.
 
 ## Dev local manuel (sans script)
@@ -195,5 +194,5 @@ Les rôles du vault Obsidian, de Redis, de SQLite et les recommandations de sauv
 
 - La persistance des rooms est faite via Redis.
 - Le frontend est servi en statique via Nginx.
-- Le serveur applique des controles d'acces de base via API key + mot de passe optionnel de room.
+- Le serveur exige un JWT (connexion par e-mail) pour créer ou supprimer des partages depuis le plugin ; un mot de passe optionnel protège chaque room.
 - Sur le web, l’éditeur est le **texte brut Markdown** dans `Y.Text` (comme Obsidian en mode source), ce qui aligne la collab avec le plugin.

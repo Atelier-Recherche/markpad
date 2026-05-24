@@ -6,7 +6,8 @@
     "packages/collab-note",
     "plugin",
     "server",
-    "web"
+    "web",
+    "tests/multi-client"
   ],
   "scripts": {
     "build": "npm run -w @markpad/collab-note build && npm run -w server build && npm run -w web build && npm run -w plugin build",
@@ -14,7 +15,8 @@
     "dev:server": "npm run -w server dev",
     "dev:web": "npm run -w web dev",
     "dev:plugin": "npm run -w plugin dev",
-    "test-smtp": "npm run test-smtp -w server"
+    "test-smtp": "npm run test-smtp -w server",
+    "test:multi": "npm run test -w @markpad/multi-client"
   },
   "overrides": {
     "@codemirror/state": "6.5.0",

@@ -101,7 +101,7 @@
     "collabTitle": "Collaboration",
     "collabBody": "Open a shared room to edit live in the browser or join from Obsidian.",
     "demoCta": "Open demo room",
-    "pluginHint": "In Obsidian: set the server URL and your User ID. To let the plugin create shares, use either the server secret (ALLOWED_API_KEYS) or the JWT from My account after sign-in — you do not need both."
+    "pluginHint": "In Obsidian: set the server URL, then paste the sign-in token copied from My account after email sign-in. Your User ID is filled in automatically."
   },
   "guest": "Guest",
   "me": {
@@ -138,9 +138,9 @@
     "adminHint": "Your account has administrator rights.",
     "logout": "Forget token on this device",
     "copied": "Copied",
-    "jwtPluginTitle": "Token for the plugin (instead of the server API key)",
-    "jwtPluginHint": "This token proves you are signed in: paste it into the Obsidian plugin field “API key or JWT”. It replaces ALLOWED_API_KEYS for creating shares from the plugin. Keep the same User ID as below.",
-    "copyJwt": "Copy JWT token"
+    "jwtPluginTitle": "Token for the Obsidian plugin",
+    "jwtPluginHint": "Paste this token into Markpad settings in Obsidian (“Sign-in token” field). It lets you create and delete your shares. Your User ID is filled in automatically.",
+    "copyJwt": "Copy token"
   },
   "auth": {
     "verify": {

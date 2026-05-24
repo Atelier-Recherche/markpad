@@ -101,7 +101,7 @@
     "collabTitle": "Collaboration",
     "collabBody": "Ouvrez une room partagée pour éditer en direct avec le navigateur ou rejoindre depuis Obsidian.",
     "demoCta": "Ouvrir la room démo",
-    "pluginHint": "Dans Obsidian : indiquez l’URL du serveur et votre User ID. Pour autoriser le plugin à créer des partages, utilisez soit la clé secrète du serveur (ALLOWED_API_KEYS), soit le jeton JWT obtenu après connexion sur Mon compte — pas besoin des deux."
+    "pluginHint": "Dans Obsidian : indiquez l’URL du serveur, puis collez le jeton de connexion copié depuis Mon compte après votre connexion par e-mail. L’identifiant utilisateur se remplit automatiquement."
   },
   "guest": "Invité",
   "me": {
@@ -138,9 +138,9 @@
     "adminHint": "Votre compte a les droits administrateur.",
     "logout": "Oublier le jeton sur cet appareil",
     "copied": "Copié",
-    "jwtPluginTitle": "Jeton pour le plugin (alternative à la clé serveur)",
-    "jwtPluginHint": "Ce jeton prouve que vous êtes connecté·e : collez-le dans le champ « Clé API ou jeton » des réglages Obsidian. Il remplace la clé ALLOWED_API_KEYS pour créer des partages depuis le plugin. Le champ User ID doit rester identique à celui ci-dessus.",
-    "copyJwt": "Copier le jeton JWT"
+    "jwtPluginTitle": "Jeton pour le plugin Obsidian",
+    "jwtPluginHint": "Collez ce jeton dans les réglages Markpad d’Obsidian (champ « Jeton de connexion »). Il permet de créer et supprimer vos partages. L’identifiant utilisateur se remplit automatiquement.",
+    "copyJwt": "Copier le jeton"
   },
   "auth": {
     "verify": {

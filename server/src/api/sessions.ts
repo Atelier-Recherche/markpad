@@ -1,6 +1,5 @@
 import type { Express, Request } from "express";
 import type Database from "better-sqlite3";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { config } from "../config.js";
 import { verifyJwt } from "./auth.js";
 import {
@@ -17,35 +16,17 @@ import {
 import { RedisDocStore } from "../persistence/redisDocStore.js";
 import type { SessionStore } from "../sessionStore.js";
 
-const hash = (value: string): Buffer => createHash("sha256").update(value).digest();
-
-const safeEq = (left: string, right: string): boolean => {
-  const a = hash(left);
-  const b = hash(right);
-  return timingSafeEqual(a, b);
-};
-
 const extractBearer = (raw: string | undefined): string => {
   if (!raw) return "";
   return raw.replace(/^Bearer\s+/i, "").trim();
 };
 
-/** Clé API globale (serveur) ou JWT utilisateur (après connexion e-mail). */
-type SessionsAuth =
-  | { mode: "api_key" }
-  | { mode: "jwt"; sub: string };
-
-const authorizeSessionsWrite = async (req: Request): Promise<SessionsAuth | null> => {
+const authorizeSessionsWrite = async (req: Request): Promise<{ sub: string } | null> => {
   const bearer = extractBearer(req.header("authorization"));
   if (!bearer) return null;
-  if (config.allowedApiKeys.some((key) => safeEq(bearer, key))) {
-    return { mode: "api_key" };
-  }
   const user = await verifyJwt(bearer);
-  if (user) {
-    return { mode: "jwt", sub: user.sub };
-  }
-  return null;
+  if (!user) return null;
+  return { sub: user.sub };
 };
 
 export const registerSessionsApi = (
@@ -57,7 +38,7 @@ export const registerSessionsApi = (
   app.post("/sessions", async (req, res) => {
     const auth = await authorizeSessionsWrite(req);
     if (!auth) {
-      res.status(401).json({ error: "invalid_api_key" });
+      res.status(401).json({ error: "unauthorized" });
       return;
     }
 
@@ -73,7 +54,7 @@ export const registerSessionsApi = (
       res.status(400).json({ error: "noteId_and_userId_required" });
       return;
     }
-    if (auth.mode === "jwt" && body.userId !== auth.sub) {
+    if (body.userId !== auth.sub) {
       res.status(403).json({ error: "userId_must_match_token" });
       return;
     }
@@ -123,7 +104,7 @@ export const registerSessionsApi = (
   app.delete("/sessions/:roomId", async (req, res) => {
     const auth = await authorizeSessionsWrite(req);
     if (!auth) {
-      res.status(401).json({ error: "invalid_api_key" });
+      res.status(401).json({ error: "unauthorized" });
       return;
     }
 
@@ -133,7 +114,7 @@ export const registerSessionsApi = (
       res.status(400).json({ error: "userId_required" });
       return;
     }
-    if (auth.mode === "jwt" && body.userId !== auth.sub) {
+    if (body.userId !== auth.sub) {
       res.status(403).json({ error: "userId_must_match_token" });
       return;
     }

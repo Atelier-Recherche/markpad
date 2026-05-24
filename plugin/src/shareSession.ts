@@ -33,7 +33,7 @@ export const createShareSession = async (payload: {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${payload.settings.apiKey}`
+      authorization: `Bearer ${payload.settings.authToken}`
     },
     body: JSON.stringify({
       noteId: payload.noteId,
@@ -73,7 +73,7 @@ export const createFolderShareSession = async (payload: {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${payload.settings.apiKey}`
+      authorization: `Bearer ${payload.settings.authToken}`
     },
     body: JSON.stringify({
       noteId: payload.noteId,
@@ -112,7 +112,7 @@ export const endShareSession = async (payload: {
     method: "DELETE",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${payload.settings.apiKey}`
+      authorization: `Bearer ${payload.settings.authToken}`
     },
     body: JSON.stringify({
       userId: payload.settings.userId

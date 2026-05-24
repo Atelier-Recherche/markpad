@@ -8,3 +8,6 @@ coverage/
 server/.redis-data/
 plugin/main.js
 deploy-to-morglaf.ps1
+.env.test
+run-multi-user-tests.ps1
+tests/

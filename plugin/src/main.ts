@@ -32,6 +32,7 @@ import {
   setMarkpadCollabDebug
 } from "./markpadDebug";
 import { patchYWebsocketProviderOutbound } from "./patchYWebsocketProviderOutbound";
+import { jwtPayloadSub, syncUserIdFromAuthToken } from "./jwt";
 import {
   assembleFileEntry,
   getBodyYText,
@@ -47,10 +48,12 @@ import {
   metaMapToRecord,
   migrateFilesMapLegacyToV2,
   OBSIDIAN_ONLY_META_KEYS,
+  assembleNoteToMarkdown,
   parseNoteFromMarkdown,
   recordToMetaMap,
   seedFileEntryFromMarkdown,
   seedNoteRootFromMarkdown,
+  stripEmbeddedFrontmatterFromBody,
   upgradeLegacyFileEntry
 } from "@markpad/collab-note";
 import { reconcileLocalBodyIntoY, RECONCILE_ORIGIN } from "./reconcile";
@@ -281,9 +284,9 @@ export default class MarkpadPlugin extends Plugin {
   private folderSharesMeta = new Map<string, FolderShareMeta>();
   /** File ancre dossier : file d’attente par chemin pour éviter courses create/modify. */
   private folderAnchorWriteQueue = new Map<string, Promise<unknown>>();
-  private autoConnectTimer: ReturnType<typeof window.setTimeout> | null = null;
+  private autoConnectTimer: number | null = null;
   /** Délai avant passage en lecture seule après une coupure WS (évite le flash sur reconnects brefs). */
-  private collabReadonlyTimer: ReturnType<typeof window.setTimeout> | null = null;
+  private collabReadonlyTimer: number | null = null;
   /** Vrai dès que le WS s'est connecté au moins une fois dans la session courante. */
   private collabHasEverConnected = false;
   /** Vrai si la note est actuellement en lecture seule (WS perdu). */
@@ -295,9 +298,12 @@ export default class MarkpadPlugin extends Plugin {
   /** Reconcile post-sync note en cours (affiche une icône « chargement »). */
   private postSyncReconcileRunning = false;
   /** Débounce disque → Y pour les fichiers partagés (vault modify). */
-  private vaultSyncTimers = new Map<string, ReturnType<typeof window.setTimeout>>();
+  private vaultSyncTimers = new Map<string, number>();
   /** Évite une boucle vault.modify ↔ syncFolderFilesFromY. */
   private suppressVaultToY = false;
+  /** Évite la réentrance Y.Map observe / sync dossier (stack overflow). */
+  private folderSyncInProgress = false;
+  private folderSyncQueued = false;
 
   private applyBodyYToCmHealed(
     cm: import("@codemirror/view").EditorView,
@@ -310,7 +316,7 @@ export default class MarkpadPlugin extends Plugin {
   private fileExplorerObserver: MutationObserver | null = null;
   private fileExplorerObservedEl: HTMLElement | null = null;
   /** Débounce : la liste virtualisée mutate en continu (~chaque frame) ; sans délai on saturerait le CPU. */
-  private explorerMutateDebounceTimer: ReturnType<typeof window.setTimeout> | null = null;
+  private explorerMutateDebounceTimer: number | null = null;
   /** Évite la réentrance : sync Yjs / layout peuvent rappeler decorate pendant un decorate. */
   private decorateSharedUiRunning = false;
   private decorateSharedUiCoalesce = false;
@@ -625,8 +631,17 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async loadSettings(): Promise<void> {
-    const loaded = await this.loadData();
-    this.settings = { ...DEFAULT_SETTINGS, ...(loaded ?? {}) };
+    const loaded = (await this.loadData()) as
+      | (Partial<MarkpadSettings> & { apiKey?: string })
+      | null;
+    const merged: MarkpadSettings = { ...DEFAULT_SETTINGS, ...(loaded ?? {}) };
+    if (!merged.authToken && loaded?.apiKey) {
+      merged.authToken = String(loaded.apiKey).trim();
+    }
+    if (merged.authToken) {
+      syncUserIdFromAuthToken(merged);
+    }
+    this.settings = merged;
   }
 
   private getActiveMarkdownFileAndView():
@@ -676,6 +691,62 @@ export default class MarkpadPlugin extends Plugin {
       // Si on sort de Markdown / de la vue active, on coupe la session collab existante.
       // Sinon, y-websocket garde une boucle de reconnexion même hors document partagé.
       if (this.activeRuntime && this.activeRuntime.mode !== "folder") this.disconnect();
+      return;
+    }
+
+    const noteShare = this.getNoteShareForFile(active.file);
+    if (noteShare) {
+      if (
+        this.activeRuntime?.mode === "note" &&
+        this.activeRuntime.filePath === active.file.path &&
+        this.activeRuntime.roomId === noteShare.roomId
+      ) {
+        const currentCm = resolveObsidianEditorView(active.view);
+        if (currentCm) {
+          const cmChanged = currentCm !== this.activeRuntime.cmView;
+          const notMounted = !isCollabMounted(currentCm);
+          if (cmChanged || notMounted) {
+            markpadCollabDebug("note:re-mount après navigation", {
+              cmChanged,
+              notMounted,
+              yLen: this.activeRuntime.yText.toString().length
+            });
+            if (cmChanged) {
+              try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* vue périmée */ }
+              this.activeRuntime.cmView = currentCm;
+            }
+            remountCollabExtensionForYText(
+              currentCm,
+              this.activeRuntime.yText,
+              this.activeRuntime.provider.awareness
+            );
+            this.applyBodyYToCmHealed(
+              currentCm,
+              this.activeRuntime.doc,
+              this.activeRuntime.yText
+            );
+          }
+        }
+        if (!this.activeRuntime.provider.wsconnected) {
+          this.activeRuntime.provider.connect();
+        }
+        return;
+      }
+      if (this.activeRuntime) {
+        this.disconnect();
+      }
+      try {
+        await this.attachSharedSession(active.file, active.view, noteShare.roomId, noteShare.shareUrl, {
+          roomPassword: this.settings.defaultRoomPassword || undefined,
+          seedFullFromEditor: false,
+          reconcileLocalOnFirstSync: false
+        });
+      } catch (error) {
+        const msg = (error as Error).message;
+        if (msg !== "no_cm") {
+          new Notice(`Markpad auto-connect: ${msg}`);
+        }
+      }
       return;
     }
 
@@ -731,80 +802,17 @@ export default class MarkpadPlugin extends Plugin {
       return;
     }
 
-    const share = this.sharedNotes.get(active.file.path);
-    if (!share) {
-      // On est sur un Markdown mais pas sur une note partagée : stop la session collab courante.
-      if (this.activeRuntime) {
-        // En mode dossier, la vue active peut être le fichier ancre
-        // `.markpad-folder-share.md` (qui n'est pas dans `sharedNotes`).
-        // On évite donc de déconnecter dans ce cas.
-        if (this.activeRuntime.mode === "folder") {
-          const folderRoot = this.activeRuntime.folderRoot ?? "";
-          const path = active.file.path;
-          const withinFolderRoot =
-            folderRoot.length > 0 &&
-            (path === folderRoot || path.startsWith(`${folderRoot}/`));
-          if (!withinFolderRoot) this.disconnect();
-        } else {
-          this.disconnect();
-        }
-      }
-      return;
-    }
-
-    if (this.activeRuntime?.filePath === active.file.path && this.activeRuntime.mode === "note") {
-      // Vérifier que la collab extension est encore montée sur l'état CM courant.
-      // Obsidian réinitialise l'état de l'EditorView quand on navigue vers un autre fichier
-      // dans la même feuille : le Compartment appendConfig est alors perdu.
-      const currentCm = resolveObsidianEditorView(active.view);
-      if (currentCm) {
-        const cmChanged = currentCm !== this.activeRuntime.cmView;
-        const notMounted = !isCollabMounted(currentCm);
-        if (cmChanged || notMounted) {
-          markpadCollabDebug("note:re-mount après navigation", {
-            cmChanged,
-            notMounted,
-            yLen: this.activeRuntime.yText.toString().length
-          });
-          if (cmChanged) {
-            try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* vue périmée */ }
-            this.activeRuntime.cmView = currentCm;
-          }
-          remountCollabExtensionForYText(
-            currentCm,
-            this.activeRuntime.yText,
-            this.activeRuntime.provider.awareness
-          );
-          // Sync initial explicite Y→CM (y-codemirror.next ne le fait pas automatiquement).
-          this.applyBodyYToCmHealed(
-            currentCm,
-            this.activeRuntime.doc,
-            this.activeRuntime.yText
-          );
-        }
-      }
-      if (!this.activeRuntime.provider.wsconnected) {
-        this.activeRuntime.provider.connect();
-      }
-      return;
-    }
-
+    // Markdown ouvert mais pas de partage note ni dossier applicable.
     if (this.activeRuntime) {
-      this.disconnect();
-    }
-
-    try {
-      await this.attachSharedSession(active.file, active.view, share.roomId, share.shareUrl, {
-        roomPassword: this.settings.defaultRoomPassword || undefined,
-          seedFullFromEditor: false,
-          // Auto-connect / reconnexion : le distant est la source de vérité au premier sync,
-          // sinon on peut re-fusionner le local et provoquer un doublage.
-          reconcileLocalOnFirstSync: false
-      });
-    } catch (error) {
-      const msg = (error as Error).message;
-      if (msg !== "no_cm") {
-        new Notice(`Markpad auto-connect: ${msg}`);
+      if (this.activeRuntime.mode === "folder") {
+        const folderRoot = this.activeRuntime.folderRoot ?? "";
+        const path = active.file.path;
+        const withinFolderRoot =
+          folderRoot.length > 0 &&
+          (path === folderRoot || path.startsWith(`${folderRoot}/`));
+        if (!withinFolderRoot) this.disconnect();
+      } else {
+        this.disconnect();
       }
     }
   }
@@ -1285,8 +1293,8 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async startSharing(): Promise<void> {
-    if (!this.settings.apiKey || !this.settings.userId) {
-      new Notice("Configure API key et user ID avant de partager.");
+    if (!this.settings.authToken?.trim() || !this.settings.userId) {
+      new Notice("Configurez le jeton de connexion (Mon compte) avant de partager.");
       return;
     }
 
@@ -1306,6 +1314,10 @@ export default class MarkpadPlugin extends Plugin {
         roomPassword: this.settings.defaultRoomPassword || undefined
       });
 
+      this.sharedNotes.set(active.file.path, {
+        roomId: created.roomId,
+        shareUrl: created.shareUrl
+      });
       await this.writeShareFrontmatter(active.file, {
         roomId: created.roomId,
         shareUrl: created.shareUrl
@@ -1434,7 +1446,7 @@ export default class MarkpadPlugin extends Plugin {
     const match = msg.match(/\((\d{3})\)/);
     const status = match?.[1] ?? "";
     if (status === "401") {
-      return "Markpad: authentification refusée (401). Vérifie la clé API/JWT dans les réglages Obsidian.";
+      return "Markpad: authentification refusée (401). Vérifie le jeton de connexion dans les réglages Obsidian (Mon compte).";
     }
     if (status === "403") {
       return "Markpad: refusé (403). Vérifie que User ID correspond bien au compte du JWT.";
@@ -2281,7 +2293,27 @@ export default class MarkpadPlugin extends Plugin {
     // Ne pas effacer les fichiers membres d'un partage dossier : leur entrée dans sharedNotes
     // est gérée par syncFolderAnchorFromFile, pas par le frontmatter markpadShare du fichier lui-même.
     const isInFolder = [...this.folderSharesMeta.values()].some((m) => m.paths.includes(file.path));
-    if (!isInFolder) this.sharedNotes.delete(file.path);
+    if (!isInFolder) {
+      if (
+        this.activeRuntime?.mode === "note" &&
+        this.activeRuntime.filePath === file.path
+      ) {
+        return;
+      }
+      this.sharedNotes.delete(file.path);
+    }
+  }
+
+  /** Partage note seule (markpadShare) : prioritaire sur l’appartenance à un dossier partagé. */
+  private getNoteShareForFile(file: TFile): PersistedShare | null {
+    const fromMap = this.sharedNotes.get(file.path);
+    if (fromMap) return fromMap;
+    const cache = this.app.metadataCache.getFileCache(file);
+    const raw = cache?.frontmatter?.[SHARE_FRONTMATTER_KEY] as PersistedShare | undefined;
+    if (raw && typeof raw.roomId === "string" && typeof raw.shareUrl === "string") {
+      return { roomId: raw.roomId, shareUrl: raw.shareUrl };
+    }
+    return null;
   }
 
   private syncFolderAnchorFromFile(file: TFile): void {
@@ -2331,8 +2363,8 @@ export default class MarkpadPlugin extends Plugin {
   }
 
   private async startSharingFolder(folder: TFolder): Promise<void> {
-    if (!this.settings.apiKey || !this.settings.userId) {
-      new Notice("Configure API key et user ID avant de partager.");
+    if (!this.settings.authToken?.trim() || !this.settings.userId) {
+      new Notice("Configurez le jeton de connexion (Mon compte) avant de partager.");
       return;
     }
     const paths = this.collectFolderShareSyncPathsInFolder(folder);
@@ -2650,9 +2682,20 @@ export default class MarkpadPlugin extends Plugin {
         return;
       }
       markpadCollabDebug("folder:Y.Map(files) observe → syncFolderFilesFromY");
-      void this.syncFolderFilesFromY(meta, folderRoot, doc);
+      this.queueFolderSyncFromY(meta, folderRoot, doc);
     };
     filesMap.observe(onFilesChange);
+    const onDocUpdateFromRemote = (update: Uint8Array, origin: unknown): void => {
+      if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
+        return;
+      }
+      if (origin !== provider) return;
+      markpadCollabDebug("folder:doc update (remote) → syncFolderFilesFromY", {
+        updateBytes: update.length
+      });
+      this.queueFolderSyncFromY(meta, folderRoot, doc);
+    };
+    doc.on("update", onDocUpdateFromRemote);
     this.collabWsStatus = provider.wsconnected ? "connected" : "connecting";
     this.activeRuntime = {
       mode: "folder",
@@ -2667,7 +2710,10 @@ export default class MarkpadPlugin extends Plugin {
       folderRoot,
       sharedPaths: meta.paths,
       debugUnload,
-      folderFilesUnload: () => filesMap.unobserve(onFilesChange)
+      folderFilesUnload: () => {
+        filesMap.unobserve(onFilesChange);
+        doc.off("update", onDocUpdateFromRemote);
+      }
     };
     this.decorateSharedUi();
     // En mode dossier, Yjs est la source de vérité des fragments fichiers :
@@ -2681,8 +2727,20 @@ export default class MarkpadPlugin extends Plugin {
         healBodyYTextIfPolluted(doc, getBodyYText(raw), "markpad-folder-heal-all");
       }
     }
-    void this.syncFolderFilesFromY(meta, folderRoot, doc);
+    this.queueFolderSyncFromY(meta, folderRoot, doc);
     this.updatePresenceInStatusBar(provider);
+  }
+
+  private queueFolderSyncFromY(
+    meta: FolderShareMeta,
+    folderRoot: string,
+    doc: Y.Doc
+  ): void {
+    if (this.folderSyncInProgress) {
+      this.folderSyncQueued = true;
+      return;
+    }
+    void this.syncFolderFilesFromY(meta, folderRoot, doc);
   }
 
   private async onMarkdownCreated(file: TFile): Promise<void> {
@@ -2718,7 +2776,7 @@ export default class MarkpadPlugin extends Plugin {
         this.activeRuntime?.mode === "folder" &&
         this.activeRuntime.roomId === meta.roomId
       ) {
-        void this.syncFolderFilesFromY(meta, root, this.activeRuntime.doc);
+        this.queueFolderSyncFromY(meta, root, this.activeRuntime.doc);
       }
       this.decorateSharedUi();
       this.refreshSharesPanel();
@@ -2731,10 +2789,15 @@ export default class MarkpadPlugin extends Plugin {
     folderRoot: string,
     doc: Y.Doc
   ): Promise<void> {
+    if (this.folderSyncInProgress) {
+      this.folderSyncQueued = true;
+      return;
+    }
     if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
       markpadCollabDebug("folder:syncFolderFilesFromY skip (pas de runtime dossier actif)");
       return;
     }
+    this.folderSyncInProgress = true;
     const files = doc.getMap("files");
     markpadCollabDebug("folder:syncFolderFilesFromY enter", {
       folderRoot,
@@ -2795,19 +2858,37 @@ export default class MarkpadPlugin extends Plugin {
         } else if (existing instanceof TFile && path === activePath) {
           try {
             const yMeta = metaMapToRecord(getMetaYMap(value));
-            await this.app.fileManager.processFrontMatter(existing, (fm) => {
-              for (const k of Object.keys(fm)) {
-                if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
-                if (!(k in yMeta)) delete fm[k];
+            const yBody = stripEmbeddedFrontmatterFromBody(getBodyYText(value).toString());
+            const onDisk = parseNoteFromMarkdown(await this.app.vault.read(existing));
+            const bodyMatches = onDisk.body.trim() === yBody.trim();
+            if (bodyMatches) {
+              const metaJson = (m: Record<string, unknown>) => JSON.stringify(m);
+              if (metaJson(onDisk.meta) !== metaJson(yMeta)) {
+                await this.app.fileManager.processFrontMatter(existing, (fm) => {
+                  for (const k of Object.keys(fm)) {
+                    if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
+                    if (!(k in yMeta)) delete fm[k];
+                  }
+                  for (const [k, v] of Object.entries(yMeta)) {
+                    fm[k] = v;
+                  }
+                });
+                changed = true;
+                markpadCollabDebug("folder:sync meta→FM (fichier actif)", path);
               }
-              for (const [k, v] of Object.entries(yMeta)) {
-                fm[k] = v;
+            } else {
+              const markdown = assembleNoteToMarkdown(yBody, yMeta);
+              if ((await this.app.vault.read(existing)) !== markdown) {
+                await this.app.vault.modify(existing, markdown);
+                changed = true;
+                markpadCollabDebug("folder:sync corps+meta (fichier actif)", path);
               }
-            });
-            changed = true;
-            markpadCollabDebug("folder:sync meta→FM (fichier actif)", path);
+              if (this.activeRuntime.cmView) {
+                this.applyBodyYToCmHealed(this.activeRuntime.cmView, doc, getBodyYText(value));
+              }
+            }
           } catch (e) {
-            markpadCollabDebug("folder:sync meta FM actif échouée", path, e);
+            markpadCollabDebug("folder:sync fichier actif échouée", path, e);
           }
         }
       }
@@ -2857,6 +2938,11 @@ export default class MarkpadPlugin extends Plugin {
       }
     } finally {
       this.suppressVaultToY = false;
+      this.folderSyncInProgress = false;
+      if (this.folderSyncQueued) {
+        this.folderSyncQueued = false;
+        void this.syncFolderFilesFromY(meta, folderRoot, doc);
+      }
     }
 
     if (changed) {

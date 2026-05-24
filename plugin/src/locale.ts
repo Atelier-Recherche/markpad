@@ -4,9 +4,10 @@ const STRINGS: Record<
   LocaleId,
   Record<
     | "serverUrl"
-    | "apiKey"
-    | "apiKeyDesc"
+    | "authToken"
+    | "authTokenDesc"
     | "userId"
+    | "userIdDesc"
     | "displayName"
     | "cursorColor"
     | "defaultRoomPassword"
@@ -27,10 +28,12 @@ const STRINGS: Record<
 > = {
   fr: {
     serverUrl: "URL du serveur",
-    apiKey: "Clé API ou jeton JWT",
-    apiKeyDesc:
-      "Deux options : (1) la clé secrète du serveur dans ALLOWED_API_KEYS — même valeur pour tous les postes autorisés ; (2) le jeton JWT copié depuis la page Mon compte après connexion par e-mail — identifie votre compte sans partager la clé serveur. Dans les deux cas le champ User ID doit correspondre à votre compte.",
+    authToken: "Jeton de connexion",
+    authTokenDesc:
+      "Copiez-le depuis la page Mon compte du serveur Markpad, après connexion par e-mail (bouton « Copier le jeton »). Il permet de créer et supprimer vos partages depuis Obsidian.",
     userId: "Identifiant utilisateur",
+    userIdDesc:
+      "Rempli automatiquement quand vous collez le jeton. Doit correspondre à votre compte Markpad (affiché sur Mon compte).",
     displayName: "Nom affiché",
     cursorColor: "Couleur du curseur",
     defaultRoomPassword: "Mot de passe room par défaut",
@@ -49,10 +52,12 @@ const STRINGS: Record<
   },
   en: {
     serverUrl: "Server URL",
-    apiKey: "API key or JWT",
-    apiKeyDesc:
-      "Either: (1) the server secret from ALLOWED_API_KEYS (same for every trusted client), or (2) the JWT copied from My account after email sign-in — proves your account without sharing the server key. User ID must match your account in both cases.",
+    authToken: "Sign-in token",
+    authTokenDesc:
+      "Copy it from the Markpad server's My account page after email sign-in (Copy token button). Required to create and delete your shares from Obsidian.",
     userId: "User ID",
+    userIdDesc:
+      "Filled automatically when you paste the token. Must match your Markpad account (shown on My account).",
     displayName: "Display name",
     cursorColor: "Cursor color",
     defaultRoomPassword: "Default room password",
@@ -71,10 +76,12 @@ const STRINGS: Record<
   },
   es: {
     serverUrl: "URL del servidor",
-    apiKey: "Clave API o JWT",
-    apiKeyDesc:
-      "Opciones: (1) el secreto del servidor (ALLOWED_API_KEYS), común a los clientes de confianza ; (2) el JWT copiado de Mi cuenta tras iniciar sesión — identifica tu cuenta sin la clave del servidor. El User ID debe coincidir con tu cuenta.",
+    authToken: "Token de conexión",
+    authTokenDesc:
+      "Cópialo desde Mi cuenta en el servidor Markpad, tras iniciar sesión por correo (botón «Copiar token»). Necesario para crear y eliminar tus compartidos desde Obsidian.",
     userId: "ID de usuario",
+    userIdDesc:
+      "Se rellena al pegar el token. Debe coincidir con tu cuenta Markpad (visible en Mi cuenta).",
     displayName: "Nombre mostrado",
     cursorColor: "Color del cursor",
     defaultRoomPassword: "Contraseña de sala por defecto",
@@ -93,10 +100,12 @@ const STRINGS: Record<
   },
   de: {
     serverUrl: "Server-URL",
-    apiKey: "API-Schlüssel oder JWT",
-    apiKeyDesc:
-      "Entweder: (1) der Server-Schlüssel aus ALLOWED_API_KEYS (für alle vertrauenswürdigen Clients gleich), oder (2) das JWT von Mein Konto nach E-Mail-Anmeldung — identifiziert Ihr Konto ohne Server-Schlüssel. User ID muss zum Konto passen.",
+    authToken: "Anmeldetoken",
+    authTokenDesc:
+      "Aus „Mein Konto“ auf dem Markpad-Server nach E-Mail-Anmeldung kopieren (Schaltfläche „Token kopieren“). Erforderlich, um Freigaben aus Obsidian zu erstellen und zu löschen.",
     userId: "Benutzer-ID",
+    userIdDesc:
+      "Wird beim Einfügen des Tokens automatisch ausgefüllt. Muss zu Ihrem Markpad-Konto passen (auf „Mein Konto“ angezeigt).",
     displayName: "Anzeigename",
     cursorColor: "Cursorfarbe",
     defaultRoomPassword: "Standard-Raumpasswort",

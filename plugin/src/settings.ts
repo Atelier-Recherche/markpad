@@ -1,11 +1,13 @@
 import { App, Modal, PluginSettingTab, Setting } from "obsidian";
 import type MarkpadPlugin from "./main";
+import { syncUserIdFromAuthToken } from "./jwt";
 
 import { t, type LocaleId } from "./locale";
 
 export interface MarkpadSettings {
   serverUrl: string;
-  apiKey: string;
+  /** JWT obtenu sur la page Mon compte après connexion par e-mail. */
+  authToken: string;
   userId: string;
   displayName: string;
   color: string;
@@ -20,7 +22,7 @@ export interface MarkpadSettings {
 
 export const DEFAULT_SETTINGS: MarkpadSettings = {
   serverUrl: "http://localhost:1234",
-  apiKey: "",
+  authToken: "",
   userId: "",
   displayName: "Obsidian User",
   color: "#7c3aed",
@@ -68,18 +70,19 @@ export class MarkpadSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName(t(L, "apiKey"))
-      .setDesc(t(L, "apiKeyDesc"))
+      .setName(t(L, "authToken"))
+      .setDesc(t(L, "authTokenDesc"))
       .addText((text) =>
-        text.setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-          this.plugin.settings.apiKey = value.trim();
+        text.setValue(this.plugin.settings.authToken).onChange(async (value) => {
+          this.plugin.settings.authToken = value.trim();
+          syncUserIdFromAuthToken(this.plugin.settings);
           await this.plugin.saveSettings();
         })
       );
 
     new Setting(containerEl)
       .setName(t(L, "userId"))
-      .setDesc("Identifiant unique de l'utilisateur.")
+      .setDesc(t(L, "userIdDesc"))
       .addText((text) =>
         text.setValue(this.plugin.settings.userId).onChange(async (value) => {
           this.plugin.settings.userId = value.trim();

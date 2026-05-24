@@ -101,7 +101,7 @@
     "collabTitle": "Zusammenarbeit",
     "collabBody": "Öffnen Sie einen gemeinsamen Raum für Live-Bearbeitung im Browser oder aus Obsidian.",
     "demoCta": "Demo-Raum öffnen",
-    "pluginHint": "In Obsidian: Server-URL und User ID. Für Freigaben entweder den Server-Schlüssel (ALLOWED_API_KEYS) oder das JWT von Mein Konto nach Anmeldung — nicht beides nötig."
+    "pluginHint": "In Obsidian: Server-URL und das Anmeldetoken von Mein Konto nach E-Mail-Anmeldung einfügen. Die Benutzer-ID wird automatisch ausgefüllt."
   },
   "guest": "Gast",
   "me": {
@@ -138,9 +138,9 @@
     "adminHint": "Ihr Konto hat Administratorrechte.",
     "logout": "Token auf diesem Gerät vergessen",
     "copied": "Kopiert",
-    "jwtPluginTitle": "Token für das Plugin (statt API-Schlüssel)",
-    "jwtPluginHint": "Dieses Token beweist die Anmeldung: in Obsidian ins Feld „API-Schlüssel oder JWT“ einfügen. Ersetzt ALLOWED_API_KEYS für Freigaben. Gleiche User ID wie unten verwenden.",
-    "copyJwt": "JWT kopieren"
+    "jwtPluginTitle": "Token für das Obsidian-Plugin",
+    "jwtPluginHint": "In die Markpad-Einstellungen in Obsidian einfügen (Feld „Anmeldetoken“). Ermöglicht Erstellen und Löschen Ihrer Freigaben. Die Benutzer-ID wird automatisch ausgefüllt.",
+    "copyJwt": "Token kopieren"
   },
   "auth": {
     "verify": {

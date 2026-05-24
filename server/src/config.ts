@@ -57,7 +57,6 @@ export const config = {
   publicServerUrl: process.env.PUBLIC_SERVER_URL ?? "http://localhost:1234",
   publicWebUrl: process.env.PUBLIC_WEB_URL ?? "http://localhost:8080",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
-  allowedApiKeys: parseList(process.env.ALLOWED_API_KEYS),
   rateLimitWindowMs: parseIntOr(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
   rateLimitMax: parseIntOr(process.env.RATE_LIMIT_MAX, 200),
   /** Derrière un reverse proxy (obsidian.morglaf.com, etc.) : requis pour express-rate-limit (X-Forwarded-For). Désactiver avec TRUST_PROXY=0 */
@@ -86,7 +85,3 @@ export const config = {
     parseBoolOrUndef(process.env.ALLOW_PUBLIC_SIGNUP) !== false,
   chatRetentionHoursDefault: parseIntOr(process.env.CHAT_RETENTION_HOURS_DEFAULT, 24)
 };
-
-if (config.allowedApiKeys.length === 0) {
-  throw new Error("ALLOWED_API_KEYS must contain at least one key.");
-}
