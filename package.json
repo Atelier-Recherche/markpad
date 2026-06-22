@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "npm run -w @markpad/collab-note build && npm run -w server build && npm run -w web build && npm run -w plugin build",
+    "build:plugin": "npm run -w @markpad/collab-note build && npm run -w plugin build",
     "lint": "npm run -w server lint && npm run -w web lint && npm run -w plugin lint",
     "dev:server": "npm run -w server dev",
     "dev:web": "npm run -w web dev",

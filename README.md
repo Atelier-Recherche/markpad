@@ -24,19 +24,18 @@ Markpad est un mono-repo de collaboration temps reel pour notes Markdown avec 3 
 - **Sens Obsidian → Web** : en plus de y-codemirror, un petit module CodeMirror réaligne `Y.Text` sur le document si la frappe locale et Y divergent (contourne des cas où le binding CM→Y ne propage pas, selon la version Obsidian / Live Preview). La bonne instance `EditorView` est résolue (source, `editorComponent`, sous-mode d’édition) avant de monter la collab.
 - **Dépannage** : dans les réglages du plugin, activer « Logs diagnostic (console) », ouvrir la console développeur (Ctrl+Shift+I), filtrer sur `Markpad:collab` : tu verras les événements horodatés (résolution CM, pont, `Y.Doc update`, WebSocket, `editor-change`). En **partage dossier**, les lignes préfixées `folder:` détaillent le démarrage (`startSharing`, `attach computed`, clés du `Y.Map`, `syncFolderFilesFromY`, patch WebSocket sortant) — indispensable si la sync dossier ou les icônes dossier posent problème.
 
-## Infrastructure Docker
+## Infrastructure (production)
 
-`docker-compose.yml` orchestre :
+Le déploiement serveur passe par **Coolify** et `docker-compose.coolify.yml` :
 
 - `redis` : stockage temporaire des documents Yjs
-- `server` : API + WebSocket, expose `1234`
-- `web` : frontend statique Nginx, expose `WEB_PORT` (defaut `8080`)
+- `server` : API + WebSocket (interne, port 1234)
+- `web` : frontend Nginx + reverse proxy API (exposé via Traefik)
 
-Variables principales (voir [`.env.example`](.env.example)) :
+Variables principales (configurées dans l’UI Coolify, voir [`.env.example`](.env.example) comme référence) :
 
 - `SERVER_PORT`, `SERVER_HOST`
-- `WEB_PORT`
-- `PUBLIC_SERVER_URL`, `PUBLIC_WEB_URL`
+- `PUBLIC_SERVER_URL`, `PUBLIC_WEB_URL` (même URL en prod, ex. `https://sync.atechnologie.fr`)
 - `REDIS_URL`
 - `SESSION_MAX_IDLE_MS` — durée sans activité avant suppression de la room (défaut ~1 an)
 - `SESSION_CLEANUP_INTERVAL_MS` — fréquence du nettoyage des rooms expirées
@@ -61,7 +60,7 @@ Variables principales (voir [`.env.example`](.env.example)) :
 
 ## Compte administrateur (web)
 
-- Renseigner **`ADMIN_EMAILS`** avec votre adresse (ex. `vous@exemple.com`) dans `.env`, **ou** promouvoir un utilisateur en base (champ `is_admin` sur la table `users`).
+- Renseigner **`ADMIN_EMAILS`** dans Coolify (ou `.env` en dev local), **ou** promouvoir un utilisateur en base (champ `is_admin` sur la table `users`).
 - Se connecter avec le **lien magique** comme n’importe quel utilisateur (même adresse que dans `ADMIN_EMAILS` si vous utilisez cette méthode).
 - Appeler les routes **`/admin/shares`**, **`/admin/users`**, **`DELETE /admin/sessions/:roomId`**, etc. avec le même **`Authorization: Bearer <JWT>`** que pour `/me`. La page **`/admin`** du frontend affiche un aperçu JSON (à compléter selon vos besoins).
 
@@ -84,105 +83,47 @@ Variables principales (voir [`.env.example`](.env.example)) :
 
 ## Prerequis
 
-- Node.js / npm
-- Docker Desktop
+- Node.js / npm (build du plugin en local)
 - Obsidian (pour charger le plugin)
 
-## Script de deployment unique
+## Build et installation du plugin Obsidian
 
-Le script `deploy-markpad.ps1` couvre :
-
-- build npm
-- rebuild/restart Docker (global ou cible)
-- deployment du plugin dans le vault Obsidian
-
-### Usage rapide
-
-Execution complete (build monorepo + stack Docker + plugin) :
+Le script `build-plugin.ps1` compile le plugin et le copie dans le vault :
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-markpad.ps1
+powershell -ExecutionPolicy Bypass -File .\build-plugin.ps1
 ```
 
-Build + restart **server uniquement** :
+Équivalent npm (sans copie vers le vault) :
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-markpad.ps1 -Target server
+npm run build:plugin
 ```
 
-Build + restart **web uniquement** :
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-markpad.ps1 -Target web
-```
-
-### Déploiement Morglaf (`deploy-to-morglaf.ps1`, local, gitignored)
-
-Le script pousse `main` sur GitHub puis exécute `docker-compose up -d --build` sur le serveur. Pour voir l’**onglet Admin → Réglages** (rendu avancé / modules) :
-
-1. **Commiter** les changements web localement (le script fait `git add .` + commit sauf si `-NoCommit`).
-2. Lancer le déploiement **sans** `-NoRebuild` (sinon l’ancienne image Docker `web` reste servie).
-3. Sur https://obsidian.morglaf.com/admin : **Ctrl+F5** (cache navigateur).
-
-Si Firefox affiche `Cannot GET /admin/` après F5 : l’image Docker **web** doit inclure le correctif nginx (page `/admin` servie par `index.html`, API seulement sous `/admin/shares`, etc.). Rebuild obligatoire : `docker-compose up -d --build web`.
-
-Exemple :
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-to-morglaf.ps1 -FastDeploy
-```
-
-`-FastDeploy` = `git pull` + rebuild Docker (sans effacer tout le dossier serveur).
-
-Build + deployment **plugin uniquement** :
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-markpad.ps1 -Target plugin
-```
-
-Si tu veux aussi redeployer le plugin apres un build `web` ou `server` :
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-markpad.ps1 -Target web -DeployPluginAfterServiceBuild
-```
-
-Options utiles :
-
-- `-VaultPluginsPath "D:\Notes\.obsidian\plugins"` (chemin vault)
-- `-PluginId "markpad"` (nom dossier plugin cible)
-- `-SkipNpmInstall`
-- `-SkipDocker`
-
-En cas de conflit de port web (ex: `8080` deja utilise), change dans `.env` :
-
-```env
-WEB_PORT=8081
-PUBLIC_WEB_URL=http://localhost:8081
-```
-
-## Installation du plugin dans Obsidian
-
-Le script copie automatiquement :
+Fichiers copiés vers `D:\Notes\.obsidian\plugins\markpad` (par défaut) :
 
 - `plugin/main.js`
 - `plugin/manifest.json`
 - `plugin/versions.json`
 
-vers :
+Options :
 
-- `D:\Notes\.obsidian\plugins\markpad` (par defaut)
+- `-VaultPluginsPath "D:\Notes\.obsidian\plugins"`
+- `-PluginId "markpad"`
+- `-SkipNpmInstall`
 
 Ensuite, dans Obsidian :
 
 1. Active le plugin communautaire `Markpad`.
-2. Configure `Server URL`, puis collez le **jeton de connexion** copié depuis **Mon compte**.
+2. Configure `Server URL` (ex. `https://sync.atechnologie.fr`), puis colle le **jeton de connexion** copié depuis **Mon compte**.
 3. Ouvre une note et lance `Start Sharing`.
 
-## Dev local manuel (sans script)
+Release publique du plugin (GitHub Actions) : voir `Release-Plugin.ps1`.
 
-- Build global : `npm run build`
+## Dev local (optionnel, sans Docker)
+
 - Lint global : `npm run lint`
-- Server dev : `npm run -w server dev`
+- Server dev : `npm run -w server dev` (variables dans `.env` à la racine)
 - Web dev : `npm run -w web dev`
 - Plugin watch : `npm run -w plugin dev`
 
