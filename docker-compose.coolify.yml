@@ -1,6 +1,7 @@
 # Déploiement Coolify (GitHub) — ne pas publier de ports sur l'hôte : Traefik route vers `web:80`.
 # Dans Coolify : Build Pack = Docker Compose, fichier = docker-compose.coolify.yml
 # Domaine à assigner au service `web` : https://sync.atechnologie.fr
+# Secrets avec $ (JWT_SECRET, SMTP_PASS) : doubler chaque $ dans l'UI Coolify ($$).
 
 services:
   redis:
@@ -29,11 +30,9 @@ services:
       context: .
       dockerfile: web/Dockerfile
       args:
-        VITE_SERVER_BASE_URL: ${PUBLIC_SERVER_URL:?}
+        VITE_SERVER_BASE_URL: ${PUBLIC_SERVER_URL}
     expose:
       - "80"
-    environment:
-      - SERVICE_FQDN_WEB
     depends_on:
       - server
 
