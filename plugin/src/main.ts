@@ -14,6 +14,8 @@ import {
 } from "obsidian";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import { ySyncFacet } from "y-codemirror.next";
+import { applyMinimalYTextEdit } from "./applyMinimalYTextEdit";
 import {
   applyYTextToCm,
   hideReadonlyBanner,
@@ -53,6 +55,7 @@ import {
   migrateFilesMapLegacyToV2,
   OBSIDIAN_ONLY_META_KEYS,
   assembleNoteToMarkdown,
+  getFrontmatterPrefixLength,
   parseNoteFromMarkdown,
   recordToMetaMap,
   seedFileEntryFromMarkdown,
@@ -101,6 +104,8 @@ type ActiveRuntime = {
   debugUnload?: () => void;
   /** Nettoyage observer Y.Map "files" en mode dossier. */
   folderFilesUnload?: () => void;
+  /** Observer meta Y du fichier actif (dossier). */
+  folderMetaObserveUnload?: () => void;
 };
 
 type PersistedShare = {
@@ -312,6 +317,8 @@ export default class MarkpadPlugin extends Plugin {
   private folderSyncQueued = false;
   /** Débounce sync vault après updates Y distants (évite FM/cursor toutes les ~200 ms). */
   private folderRemoteSyncTimer: number | null = null;
+  /** Débounce meta Y → frontmatter vault (fichier actif dossier). */
+  private activeFileMetaToVaultTimer: number | null = null;
   /** Bloque tryAutoConnect pendant startSharing / attach explicite (évite un 2e attach seed=false). */
   private collabAttachInProgress = false;
   /** Après un attach réussi : pas de disconnect sur flicker UI / auto-connect agressif. */
@@ -331,6 +338,39 @@ export default class MarkpadPlugin extends Plugin {
   ): boolean {
     healBodyYTextIfPolluted(doc, body, "markpad-heal-before-cm");
     return applyYTextToCm(cm, body);
+  }
+
+  /**
+   * Après un update Y distant, le Y.Text du facet CM peut être périmé (référence détachée).
+   * Re-monte la liaison et réinjecte le corps CM→Y si Y est vide.
+   */
+  private healNoteCollabCmBinding(
+    doc: Y.Doc,
+    cm: import("@codemirror/view").EditorView,
+    awareness: WebsocketProvider["awareness"],
+    reason: string
+  ): Y.Text {
+    const fresh = getNoteBodyYText(doc);
+    let facetY: Y.Text | undefined;
+    try {
+      facetY = (cm.state.facet(ySyncFacet) as { ytext?: Y.Text } | undefined)?.ytext;
+    } catch {
+      facetY = undefined;
+    }
+    if (!facetY || facetY !== fresh) {
+      markpadCollabDebug("note: heal binding → re-montage CM↔Y", { reason, facetStale: facetY !== fresh });
+      remountCollabExtensionForYText(cm, fresh, awareness);
+    }
+    const cmStr = cm.state.doc.toString();
+    let yStr = fresh.toString();
+    if (yStr.length === 0 && cmStr.length > 0) {
+      applyMinimalYTextEdit(doc, fresh, yStr, cmStr, "markpad-heal-y-empty");
+      yStr = fresh.toString();
+      markpadCollabDebug("note: heal binding → Y réinjecté depuis CM", { reason, yLen: yStr.length });
+    } else if (yStr.length > 0 && cmStr.length === 0) {
+      this.applyBodyYToCmHealed(cm, doc, fresh);
+    }
+    return fresh;
   }
   private fileExplorerObserver: MutationObserver | null = null;
   private fileExplorerObservedEl: HTMLElement | null = null;
@@ -491,7 +531,14 @@ export default class MarkpadPlugin extends Plugin {
             if (cm) hideReadonlyBanner(cm);
           }
         }
-        if (file) void this.onFileOpenReattach(file);
+        if (file instanceof TFile && this.isMarkdownFile(file)) {
+          void this.onFileOpenReattach(file);
+          if (this.activeRuntime?.mode === "folder") {
+            window.setTimeout(() => {
+              void this.ensureFolderCollabForOpenedFile(file);
+            }, 80);
+          }
+        }
       })
     );
     this.registerDomEvent(document, "click", (event) => {
@@ -708,6 +755,18 @@ export default class MarkpadPlugin extends Plugin {
     const file = view.file;
     if (!file) return undefined;
     return { file, view };
+  }
+
+  /** Inclut les « rogue leaf » (ex. modale du plugin Base Board). */
+  private findMarkdownViewForPath(path: string): MarkdownView | null {
+    let found: MarkdownView | null = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file?.path === path) {
+        found = view;
+      }
+    });
+    return found;
   }
 
   private isMarkdownFile(file: TAbstractFile): file is TFile {
@@ -991,49 +1050,10 @@ export default class MarkpadPlugin extends Plugin {
   private async onFileOpenReattach(file: TFile): Promise<void> {
     if (!this.activeRuntime) return;
 
-    // Mode dossier : re-mount immédiat si le même fichier est rouvert et que l'état CM a été réinitialisé.
-    // Les changements de fichier dans le dossier sont gérés par onFolderLeafChange / switchFolderActiveFile.
     if (this.activeRuntime.mode === "folder") {
-      if (
-        this.activeRuntime.filePath !== file.path ||
-        !this.activeRuntime.sharedPaths?.includes(file.path)
-      ) return;
-
+      if (!this.activeRuntime.sharedPaths?.includes(file.path)) return;
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-      const folderView = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!folderView || folderView.file?.path !== file.path) return;
-      const folderCm = resolveObsidianEditorView(folderView);
-      if (!folderCm) return;
-      const folderCmChanged = folderCm !== this.activeRuntime.cmView;
-      const folderNotMounted = !isCollabMounted(folderCm);
-      if (!folderCmChanged && !folderNotMounted) return;
-
-      markpadCollabDebug("folder:file-open re-mount immédiat", {
-        folderCmChanged,
-        folderNotMounted,
-        yLen: this.activeRuntime.yText.toString().length
-      });
-
-      if (folderCmChanged) {
-        try { unmountCollabEditable(this.activeRuntime.cmView); } catch { /* stale */ }
-        try { unmountCollabExtension(this.activeRuntime.cmView); } catch { /* stale */ }
-        this.activeRuntime.cmView = folderCm;
-      }
-      remountCollabExtensionForYText(folderCm, this.activeRuntime.yText, this.activeRuntime.provider.awareness);
-      const folderSynced = this.applyBodyYToCmHealed(
-        folderCm,
-        this.activeRuntime.doc,
-        this.activeRuntime.yText
-      );
-      markpadCollabDebug("folder:file-open sync Y→CM initial", {
-        folderSynced,
-        yLen: this.activeRuntime.yText.toString().length,
-        cmLen: folderCm.state.doc.toString().length
-      });
-      mountCollabEditable(folderCm, !this.collabIsReadonly);
-      if (!this.activeRuntime.provider.wsconnected) {
-        this.activeRuntime.provider.connect();
-      }
+      await this.ensureFolderCollabForOpenedFile(file);
       return;
     }
 
@@ -1143,6 +1163,104 @@ export default class MarkpadPlugin extends Plugin {
     );
   }
 
+  private collabMetaKeys(meta: Record<string, unknown>): string[] {
+    return Object.keys(meta).filter((k) => !OBSIDIAN_ONLY_META_KEYS.has(k));
+  }
+
+  private collabMetaEquals(
+    a: Record<string, unknown>,
+    b: Record<string, unknown>
+  ): boolean {
+    const keys = new Set([...this.collabMetaKeys(a), ...this.collabMetaKeys(b)]);
+    for (const k of keys) {
+      if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Réécrit le frontmatter vault depuis Y.meta sans toucher au corps CM/Y
+   * (évite la perte de YAML quand Obsidian autosave le buffer corps seul).
+   */
+  private async syncActiveFileVaultFrontmatterFromY(
+    file: TFile,
+    metaMap: Y.Map<unknown>,
+    bodyY: Y.Text
+  ): Promise<boolean> {
+    const yMeta = metaMapToRecord(metaMap);
+    if (this.collabMetaKeys(yMeta).length === 0) return false;
+
+    let raw: string;
+    try {
+      raw = await this.app.vault.read(file);
+    } catch {
+      return false;
+    }
+    const parsed = parseNoteFromMarkdown(raw);
+    if (this.collabMetaEquals(parsed.meta, yMeta)) return false;
+
+    const yBody = stripEmbeddedFrontmatterFromBody(bodyY.toString());
+    if (parsed.body.trim() !== yBody.trim()) {
+      markpadCollabDebug("folder:sync meta→FM ignoré (corps disque ≠ Y)", file.path);
+      return false;
+    }
+
+    this.suppressVaultToY = true;
+    try {
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        for (const k of Object.keys(fm)) {
+          if (OBSIDIAN_ONLY_META_KEYS.has(k)) continue;
+          if (!(k in yMeta)) delete fm[k];
+        }
+        for (const [k, v] of Object.entries(yMeta)) {
+          if (!OBSIDIAN_ONLY_META_KEYS.has(k)) fm[k] = v;
+        }
+      });
+      markpadCollabDebug("folder:sync meta→FM (fichier actif, corps inchangé)", file.path);
+      return true;
+    } catch (e) {
+      markpadCollabDebug("folder:sync meta→FM échouée", file.path, e);
+      return false;
+    } finally {
+      this.suppressVaultToY = false;
+    }
+  }
+
+  private queueActiveFileMetaToVault(file: TFile): void {
+    if (this.activeFileMetaToVaultTimer != null) {
+      window.clearTimeout(this.activeFileMetaToVaultTimer);
+    }
+    this.activeFileMetaToVaultTimer = window.setTimeout(() => {
+      this.activeFileMetaToVaultTimer = null;
+      void this.flushActiveFileMetaToVault(file);
+    }, 800);
+  }
+
+  private async flushActiveFileMetaToVault(file: TFile): Promise<void> {
+    if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
+    if (this.activeRuntime.filePath !== file.path) return;
+    const entry = getFileEntry(this.activeRuntime.doc, file.path);
+    if (!entry) return;
+    await this.syncActiveFileVaultFrontmatterFromY(file, getMetaYMap(entry), getBodyYText(entry));
+  }
+
+  private bindFolderActiveMetaObserve(file: TFile, doc: Y.Doc): void {
+    if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
+    this.activeRuntime.folderMetaObserveUnload?.();
+    const entry = getFileEntry(doc, file.path);
+    if (!entry) return;
+    const metaMap = getMetaYMap(entry);
+    const onChange = (): void => {
+      if (!this.activeRuntime || this.activeRuntime.doc !== doc || this.activeRuntime.mode !== "folder") {
+        return;
+      }
+      if (this.activeRuntime.filePath !== file.path) return;
+      this.queueActiveFileMetaToVault(file);
+    };
+    metaMap.observe(onChange);
+    this.activeRuntime.folderMetaObserveUnload = () => metaMap.unobserve(onChange);
+  }
+
   private async syncVaultFileIntoY(file: TFile): Promise<void> {
     if (!this.activeRuntime || this.suppressVaultToY) return;
     if (!this.fileInActiveCollabRoom(file)) return;
@@ -1151,7 +1269,19 @@ export default class MarkpadPlugin extends Plugin {
       const parsed = parseNoteFromMarkdown(raw);
       const { doc, mode, filePath } = this.activeRuntime;
       if (mode === "note") {
-        mergeMetaFromParsed(doc, getNoteMetaYMap(doc), parsed.meta, "markpad-vault-meta");
+        const noteMeta = getNoteMetaYMap(doc);
+        const yMeta = metaMapToRecord(noteMeta);
+        const diskHasFm = getFrontmatterPrefixLength(raw) != null;
+        const yHasMeta = this.collabMetaKeys(yMeta).length > 0;
+        if (filePath === file.path && !diskHasFm && yHasMeta) {
+          await this.syncActiveFileVaultFrontmatterFromY(
+            file,
+            noteMeta,
+            getNoteBodyYText(doc)
+          );
+          return;
+        }
+        mergeMetaFromParsed(doc, noteMeta, parsed.meta, "markpad-vault-meta");
         if (filePath !== file.path) return;
         return;
       }
@@ -1163,7 +1293,32 @@ export default class MarkpadPlugin extends Plugin {
       }
       const isActive = filePath === file.path;
       if (isActive && entry) {
-        mergeMetaFromParsed(doc, getMetaYMap(entry), parsed.meta, "markpad-vault-meta");
+        const bodyY = getBodyYText(entry);
+        const yBody = stripEmbeddedFrontmatterFromBody(bodyY.toString());
+        const cmBody = this.activeRuntime.cmView.state.doc.toString();
+        const vaultBody = stripEmbeddedFrontmatterFromBody(parsed.body);
+        const externalEditor =
+          vaultBody.trim() !== yBody.trim() && vaultBody.trim() !== cmBody.trim();
+        if (externalEditor) {
+          reconcileLocalBodyIntoY(doc, bodyY, parsed.body);
+          mergeMetaFromParsed(doc, getMetaYMap(entry), parsed.meta, "markpad-vault-external");
+          markpadCollabDebug("vault→Y corps+meta (éditeur externe / modal)", file.path);
+          void this.ensureFolderCollabForOpenedFile(file);
+          return;
+        }
+        const metaMap = getMetaYMap(entry);
+        const yMeta = metaMapToRecord(metaMap);
+        const diskHasFm = getFrontmatterPrefixLength(raw) != null;
+        const yHasMeta = this.collabMetaKeys(yMeta).length > 0;
+        if (!diskHasFm && yHasMeta) {
+          await this.syncActiveFileVaultFrontmatterFromY(
+            file,
+            metaMap,
+            bodyY
+          );
+          return;
+        }
+        mergeMetaFromParsed(doc, metaMap, parsed.meta, "markpad-vault-meta");
         return;
       }
       seedFileEntryFromMarkdown(doc, file.path, raw, "markpad-vault-sync");
@@ -1191,7 +1346,21 @@ export default class MarkpadPlugin extends Plugin {
         const bodyYText = getNoteBodyYText(doc);
         const metaMap = getNoteMetaYMap(doc);
         const yBefore = bodyYText.toString().length;
-        const status: ReconcileStatus = reconcileLocalBodyIntoY(doc, bodyYText, parsed.body);
+        let status: ReconcileStatus = reconcileLocalBodyIntoY(doc, bodyYText, parsed.body);
+        if (status === "noop" && yBefore === 0 && parsed.body.length > 0) {
+          status = reconcileLocalBodyIntoY(doc, bodyYText, parsed.body);
+        }
+        if (
+          status === "noop" &&
+          parsed.body.length > 0 &&
+          bodyYText.toString().length < parsed.body.length
+        ) {
+          doc.transact(() => {
+            if (bodyYText.length > 0) bodyYText.delete(0, bodyYText.length);
+            if (parsed.body.length > 0) bodyYText.insert(0, parsed.body);
+          }, RECONCILE_ORIGIN);
+          status = "seeded";
+        }
         mergeMetaFromParsed(doc, metaMap, parsed.meta, RECONCILE_ORIGIN);
         const yAfter = bodyYText.toString().length;
         markpadCollabDebug("postSync reconcile: fin", {
@@ -1286,7 +1455,7 @@ export default class MarkpadPlugin extends Plugin {
         seedNoteRootFromMarkdown(doc, full, "markpad-seed-note");
       }
     }
-    const yText = getNoteBodyYText(doc);
+    let yText = getNoteBodyYText(doc);
     const provider = new WebsocketProvider(`${wsBase}/ws`, roomId, doc, {
       connect: false,
       params: {
@@ -1332,19 +1501,23 @@ export default class MarkpadPlugin extends Plugin {
             initialRemoteApplied = false;
             return;
           }
+          yText = getNoteBodyYText(doc);
+          if (this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note") {
+            this.activeRuntime.yText = yText;
+          }
           const yLen = yText.toString().length;
           const cmLen = targetCm.state.doc.toString().length;
           if (yLen === 0 && cmLen > 0) {
-            const full = await this.readMarkdownForSeed(file, view);
-            if (full.length > 0) {
-              seedNoteRootFromMarkdown(doc, full, "markpad-fill-y-after-sync");
-              markpadCollabDebug("note: Y vide après sync → contenu local injecté dans Y", {
-                yLenAfter: yText.toString().length,
-                cmLen
-              });
-            } else {
-              markpadCollabDebug("note: Y et CM vides après sync, pas d'apply Y→CM");
+            yText = this.healNoteCollabCmBinding(doc, targetCm, provider.awareness, "post-sync-empty-y");
+            if (this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note") {
+              this.activeRuntime.yText = yText;
             }
+            markpadCollabDebug("note: Y vide après sync → CM réinjecté dans Y", {
+              yLenAfter: yText.toString().length,
+              cmLen
+            });
+          } else if (yLen === 0 && cmLen === 0) {
+            markpadCollabDebug("note: Y et CM vides après sync, pas d'apply Y→CM");
           } else {
             const synced = this.applyBodyYToCmHealed(targetCm, doc, yText);
             markpadCollabDebug("note: sync Y→CM après premier sync provider", {
@@ -1370,24 +1543,23 @@ export default class MarkpadPlugin extends Plugin {
     const onProviderSync = (synced: boolean): void => {
       markpadCollabDebug("note:provider sync", { synced, wsconnected: provider.wsconnected });
       if (!synced) return;
-      if (options.seedFullFromEditor && yText.toString().length === 0) {
+      const targetCm =
+        this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note"
+          ? this.activeRuntime.cmView
+          : mountedCm;
+      if (targetCm) {
+        yText = this.healNoteCollabCmBinding(doc, targetCm, provider.awareness, "provider-sync");
+        if (this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note") {
+          this.activeRuntime.yText = yText;
+        }
+      } else if (options.seedFullFromEditor && getNoteBodyYText(doc).toString().length === 0) {
         void this.readMarkdownForSeed(file, view).then((full) => {
           if (full.length > 0) {
             seedNoteRootFromMarkdown(doc, full, "markpad-reseed-after-sync");
+            yText = getNoteBodyYText(doc);
             markpadCollabDebug("note: Y vidé par sync serveur → re-seed depuis éditeur", {
               yLenAfter: yText.toString().length
             });
-            const targetCm =
-              this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note"
-                ? this.activeRuntime.cmView
-                : mountedCm;
-            if (targetCm) {
-              try {
-                this.applyBodyYToCmHealed(targetCm, doc, yText);
-              } catch (error) {
-                markpadCollabDebug("note: erreur applyYTextToCm (re-seed post-sync)", error);
-              }
-            }
           }
         });
       }
@@ -1479,6 +1651,20 @@ export default class MarkpadPlugin extends Plugin {
       yLen: yText.toString().length
     });
 
+    const onDocRemoteUpdate = (_update: Uint8Array, origin: unknown): void => {
+      if (origin !== provider) return;
+      const targetCm =
+        this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note"
+          ? this.activeRuntime.cmView
+          : mountedCm;
+      if (!targetCm) return;
+      yText = this.healNoteCollabCmBinding(doc, targetCm, provider.awareness, "remote-doc-update");
+      if (this.activeRuntime?.provider === provider && this.activeRuntime.mode === "note") {
+        this.activeRuntime.yText = yText;
+      }
+    };
+    doc.on("update", onDocRemoteUpdate);
+
     let debugUnload: (() => void) | undefined;
     if (this.settings.debugCollab) {
       const onYUpdate = (update: Uint8Array, origin: unknown): void => {
@@ -1494,6 +1680,11 @@ export default class MarkpadPlugin extends Plugin {
         doc.off("update", onYUpdate);
       };
     }
+    const priorDebugUnload = debugUnload;
+    debugUnload = () => {
+      doc.off("update", onDocRemoteUpdate);
+      priorDebugUnload?.();
+    };
 
     this.collabWsStatus = provider.wsconnected ? "connected" : "connecting";
     this.activeRuntime = {
@@ -3110,10 +3301,16 @@ export default class MarkpadPlugin extends Plugin {
       debugUnload,
       folderFilesUnload: () => {
         filesMap.unobserve(onFilesChange);
+        this.activeRuntime?.folderMetaObserveUnload?.();
+        if (this.activeRuntime) this.activeRuntime.folderMetaObserveUnload = undefined;
         doc.off("update", onDocUpdateFromRemote);
         if (this.folderRemoteSyncTimer != null) {
           window.clearTimeout(this.folderRemoteSyncTimer);
           this.folderRemoteSyncTimer = null;
+        }
+        if (this.activeFileMetaToVaultTimer != null) {
+          window.clearTimeout(this.activeFileMetaToVaultTimer);
+          this.activeFileMetaToVaultTimer = null;
         }
       }
     };
@@ -3130,6 +3327,7 @@ export default class MarkpadPlugin extends Plugin {
       }
     }
     this.markAttachGraceFolder(folderRoot);
+    this.bindFolderActiveMetaObserve(file, doc);
     this.queueFolderSyncFromY(meta, folderRoot, doc);
     this.updatePresenceInStatusBar(provider);
     if (provider.synced) {
@@ -3261,9 +3459,13 @@ export default class MarkpadPlugin extends Plugin {
             markpadCollabDebug("folder:sync modify vault échouée", path, e);
           }
         } else if (existing instanceof TFile && path === activePath) {
-          // Fichier ouvert : CM↔Y uniquement — ne pas toucher au vault (FM/processFrontMatter
-          // réinitialise l’éditeur Obsidian et saute le curseur).
-          markpadCollabDebug("folder:sync skip fichier actif (CM↔Y)", path);
+          const syncedMeta = await this.syncActiveFileVaultFrontmatterFromY(
+            existing,
+            getMetaYMap(value),
+            getBodyYText(value)
+          );
+          if (syncedMeta) changed = true;
+          else markpadCollabDebug("folder:sync skip fichier actif (CM↔Y)", path);
         }
       }
 
@@ -3330,9 +3532,71 @@ export default class MarkpadPlugin extends Plugin {
     }
   }
 
-  private async switchFolderActiveFile(file: TFile): Promise<void> {
+  /**
+   * Monte la collab sur la vue qui édite réellement le fichier (onglet actif ou modale Base Board).
+   */
+  private async ensureFolderCollabForOpenedFile(file: TFile): Promise<void> {
     if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
-    if (this.activeRuntime.filePath === file.path) return;
+    if (!this.activeRuntime.sharedPaths?.includes(file.path)) return;
+
+    const view =
+      this.findMarkdownViewForPath(file.path) ??
+      this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || view.file?.path !== file.path) return;
+
+    const cm = resolveObsidianEditorView(view);
+    if (!cm) return;
+
+    const sameFile = this.activeRuntime.filePath === file.path;
+    const cmChanged = cm !== this.activeRuntime.cmView;
+    const notMounted = !isCollabMounted(cm);
+
+    if (!sameFile) {
+      await this.switchFolderActiveFile(file, view);
+      return;
+    }
+
+    if (!cmChanged && !notMounted) return;
+
+    markpadCollabDebug("folder: collab sur éditeur secondaire (modal Base Board, etc.)", {
+      path: file.path,
+      cmChanged,
+      notMounted
+    });
+
+    try {
+      unmountCollabEditable(this.activeRuntime.cmView);
+    } catch {
+      /* vue périmée */
+    }
+    try {
+      unmountCollabExtension(this.activeRuntime.cmView);
+    } catch {
+      /* vue périmée */
+    }
+    this.activeRuntime.cmView = cm;
+    remountCollabExtensionForYText(
+      cm,
+      this.activeRuntime.yText,
+      this.activeRuntime.provider.awareness
+    );
+    this.applyBodyYToCmHealed(cm, this.activeRuntime.doc, this.activeRuntime.yText);
+    mountCollabEditable(cm, !this.collabIsReadonly);
+    this.bindFolderActiveMetaObserve(file, this.activeRuntime.doc);
+    if (!this.activeRuntime.provider.wsconnected) {
+      this.activeRuntime.provider.connect();
+    }
+  }
+
+  private async switchFolderActiveFile(
+    file: TFile,
+    view?: MarkdownView
+  ): Promise<void> {
+    if (!this.activeRuntime || this.activeRuntime.mode !== "folder") return;
+    if (this.activeRuntime.filePath === file.path) {
+      if (view) await this.ensureFolderCollabForOpenedFile(file);
+      return;
+    }
     const files = this.activeRuntime.doc.getMap("files");
     let fileEntry = getFileEntry(this.activeRuntime.doc, file.path);
     const legacy = files.get(file.path);
@@ -3353,15 +3617,39 @@ export default class MarkpadPlugin extends Plugin {
       );
     }
     const yText = getBodyYText(fileEntry);
-    const cm = this.activeRuntime.cmView;
-    // Démonte les deux compartments proprement pour éviter une double extension sur le nouveau fichier.
-    unmountCollabEditable(cm);
-    unmountCollabExtension(cm);
+    const targetView =
+      view ??
+      this.findMarkdownViewForPath(file.path) ??
+      this.app.workspace.getActiveViewOfType(MarkdownView);
+    let cm: import("@codemirror/view").EditorView | null = null;
+    if (targetView && targetView.file?.path === file.path) {
+      cm = resolveObsidianEditorView(targetView);
+    }
+    if (!cm) {
+      markpadCollabDebug("folder:switch sans vue MD, Y.Text prêt pour vault→Y", file.path);
+      this.activeRuntime.yText = yText;
+      this.activeRuntime.filePath = file.path;
+      this.bindFolderActiveMetaObserve(file, this.activeRuntime.doc);
+      this.decorateSharedUi();
+      return;
+    }
+    try {
+      unmountCollabEditable(this.activeRuntime.cmView);
+    } catch {
+      /* stale */
+    }
+    try {
+      unmountCollabExtension(this.activeRuntime.cmView);
+    } catch {
+      /* stale */
+    }
+    this.activeRuntime.cmView = cm;
     this.activeRuntime.yText = yText;
     this.activeRuntime.filePath = file.path;
     mountCollabExtensionWithYText(cm, yText, this.activeRuntime.provider.awareness);
     this.applyBodyYToCmHealed(cm, this.activeRuntime.doc, yText);
     mountCollabEditable(cm, !this.collabIsReadonly);
+    this.bindFolderActiveMetaObserve(file, this.activeRuntime.doc);
     this.decorateSharedUi();
   }
 

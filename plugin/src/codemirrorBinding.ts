@@ -12,7 +12,13 @@ import { setIcon } from "obsidian";
 import type { MarkdownView } from "obsidian";
 import { yCollab, ySyncFacet } from "y-codemirror.next";
 import * as Y from "yjs";
-import { getNoteBodyYText } from "@markpad/collab-note";
+import {
+  FILES_MAP_KEY,
+  getBodyYText,
+  getNoteBodyYText,
+  hasNoteFileShape,
+  NOTE_ROOT_KEY
+} from "@markpad/collab-note";
 import { applyMinimalYTextEdit } from "./applyMinimalYTextEdit";
 import { markpadCollabDebug } from "./markpadDebug";
 
@@ -24,6 +30,17 @@ type RemoteUser = {
 const compartmentByView = new WeakMap<EditorView, Compartment>();
 const editableCompartmentByView = new WeakMap<EditorView, Compartment>();
 const readonlyBannerByView = new WeakMap<EditorView, HTMLElement>();
+const awarenessByView = new WeakMap<EditorView, unknown>();
+
+/** Corps Y.Text courant (note seule) ; sinon le facet inchangé (dossier). */
+const resolveBridgeBodyYText = (facetY: Y.Text): Y.Text => {
+  const d = facetY.doc;
+  if (!d || d.getMap(FILES_MAP_KEY).size > 0) return facetY;
+  const root = d.getMap(NOTE_ROOT_KEY);
+  if (!hasNoteFileShape(root)) return facetY;
+  const fresh = getBodyYText(root);
+  return fresh !== facetY ? fresh : facetY;
+};
 
 /**
  * Retourne la vue CodeMirror 6 réellement utilisée pour la frappe (source, Live Preview, etc.).
@@ -95,7 +112,19 @@ class MarkpadCmYBridge {
     );
     if (!hasUserEvent) return;
     const conf = update.state.facet(ySyncFacet);
-    const ytext = conf.ytext;
+    let ytext = conf.ytext;
+    const resolved = resolveBridgeBodyYText(ytext);
+    if (resolved !== ytext) {
+      const awareness = awarenessByView.get(update.view);
+      markpadCollabDebug("pont CM→Y: facet Y.Text périmé → re-montage", {
+        facetLen: ytext.toString().length,
+        freshLen: resolved.toString().length
+      });
+      if (awareness) {
+        remountCollabExtensionForYText(update.view, resolved, awareness);
+      }
+      ytext = resolved;
+    }
     const cm = update.state.doc.toString();
     const y = ytext.toString();
     const txCount = update.transactions.length;
@@ -157,6 +186,7 @@ export const mountCollabExtensionWithYText = (
   yText: Y.Text,
   awareness: unknown
 ): void => {
+  awarenessByView.set(view, awareness);
   const ext = createCollabExtensionForYText(yText, awareness);
   let compartment = compartmentByView.get(view);
   if (compartment && !isCollabMounted(view)) {
