@@ -120,6 +120,18 @@ Ensuite, dans Obsidian :
 
 Release publique du plugin (GitHub Actions) : voir `Release-Plugin.ps1`.
 
+## Plugin Obsidian — catalogue
+
+| Élément | Détail |
+| --- | --- |
+| **ID plugin** | `markpad` |
+| **Dépôt** | [github.com/Atelier-Recherche/markpad](https://github.com/Atelier-Recherche/markpad) |
+| **Licence** | MIT — [LICENSE](LICENSE) |
+| **Réseau** | Oui — connexion WebSocket et API REST vers **votre** serveur Markpad (URL configurable). Aucune télémétrie vers des tiers. |
+| **Compte requis** | Oui pour créer/gérer des partages via le serveur (JWT par e-mail sur le serveur Markpad) |
+| **Fichiers hors vault** | Non (le serveur stocke les sessions Yjs ; voir doc infra) |
+| **Télémétrie / mise à jour auto** | non |
+
 ## Dev local (optionnel, sans Docker)
 
 - Lint global : `npm run lint`
