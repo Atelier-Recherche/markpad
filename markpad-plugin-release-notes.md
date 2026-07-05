@@ -1,3 +1,3 @@
-# Markpad 0.1.2
+# Markpad 0.1.3
 
-b91c5e1 fix(release): build collab-note avant le plugin en CI
+70f78da fix(catalog): copier manifest.json et versions.json a la racine du repo
