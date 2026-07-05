@@ -10,29 +10,45 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
 
-      - name: Install dependencies (racine + workspace plugin uniquement)
-        run: npm ci --include-workspace-root -w @markpad/plugin
+      - name: Install dependencies (racine + collab-note + plugin)
+        run: npm ci --include-workspace-root -w @markpad/collab-note -w @markpad/plugin
 
-      - name: Build plugin
-        run: npm run build -w @markpad/plugin
+      - name: Build collab-note then plugin
+        run: |
+          npm run build -w @markpad/collab-note
+          npm run build -w @markpad/plugin
+
+      - name: Verify artefacts
+        run: |
+          test -f plugin/main.js
+          test -f plugin/manifest.json
+          test -f plugin/styles.css
+          test -f plugin/versions.json
+          test -f markpad-plugin-release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
           draft: false
           prerelease: false
+          make_latest: true
+          generate_release_notes: false
           body_path: markpad-plugin-release-notes.md
           files: |
             plugin/main.js

@@ -85,7 +85,7 @@ $ErrorActionPreference = 'Stop'
 # CONFIGURATION — adapter lors de la copie vers un autre dépôt
 # =============================================================================
 $PluginSubdir = 'plugin'                             # '.' si le plugin est à la racine (ici : mono-repo Markpad)
-$CoreWorkspace = $null                               # pas de package « core » à builder avant le plugin
+$CoreWorkspace = '@markpad/collab-note'               # dist/ requis par esbuild (non versionné)
 $PluginWorkspace = '@markpad/plugin'                 # workspace npm du plugin ; $null = npm run build dans $PluginSubdir uniquement
 $ReleaseNotesFile = 'markpad-plugin-release-notes.md' # doit correspondre à body_path dans le workflow YAML
 $ReleaseNotesTitle = 'Markpad'                       # titre H1 dans le fichier de notes
